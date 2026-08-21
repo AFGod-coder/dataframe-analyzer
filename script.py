@@ -2,18 +2,20 @@ import pandas as pd
 
 df = pd.read_csv('train.csv')
 
-print("="*50)
-print("FIRST ROWs:")
-print("="*50)
-print(df.head())
+def newTopic(title, command_action):
+    print("\n" + "="*50)
+    print(title)
+    print("="*50)
+    
+    if callable(command_action):
+        result = command_action()
+        if result is not None:
+            print(result)
+    else:
+        print(command_action)
 
-print("\n" + "="*50)
-print("LAST ROWS:")
-print("="*50)
-print(df.tail())
-
-print("\n" + "="*50)
-print("COLUMN NAMES:")
-print("="*50)
-print(df.columns.tolist())
-
+newTopic("FIRST ROWs:", lambda: df.head())
+newTopic("LAST ROWS:", lambda: df.tail())
+newTopic("COLUMN NAMES:", df.columns.tolist())
+newTopic("GENERAL INFORMATION (DATA TYPES AND MEMORY USE ):", lambda: df.info())
+newTopic("NULLs COUNT:", lambda: df.isnull().sum())
