@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 df = pd.read_csv('train.csv')
 
@@ -18,7 +19,12 @@ newTopic('FIRST ROWS:', lambda: df.head())
 newTopic('LAST ROWS:', lambda: df.tail())
 newTopic('COLUMN NAMES:', df.columns.tolist())
 newTopic('GENERAL INFORMATION (DATA TYPES AND MEMORY USE):', lambda: df.info())
+newTopic("NUMBERS ESTADISTIC:", lambda: df.describe())
 newTopic('NULLs COUNT:', lambda: df.isnull().sum())
 
 rows, column = df.shape
 print(f"TOTAL SIZE: {rows}, ROWS AND {column} COLUMNS")
+
+df['date'] = pd.to_datetime(df['date'], errors='coerce')
+
+df.to_csv('clean_train.csv', index=False, encoding='utf-8')
