@@ -24,6 +24,7 @@ newTopic('NULLs COUNT:', lambda: df.isnull().sum())
 
 rows, column = df.shape
 print(f"TOTAL SIZE: {rows}, ROWS AND {column} COLUMNS")
+print(f'TOTAL DUPLICAD ITEMS: {df.duplicated().sum()}')
 
 df['date'] = pd.to_datetime(df['date'], errors='coerce')
 
