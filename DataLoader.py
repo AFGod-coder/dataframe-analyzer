@@ -6,11 +6,11 @@ class DataLoader():
         self.file_path = file_path
     
     def load(self):
-        self.__validate_file_exists()
+        self._validate_file_exists()
         
         df = pd.read_csv(self.file_path)
         return df
         
-    def __validate_file_exists(self):
+    def _validate_file_exists(self):
         if not os.path.exists(self.file_path):
-            raise FileExistsError(f"El archivo no existe en: {self.file_path}")
+            raise FileNotFoundError(f"El archivo no existe en: {self.file_path}")
