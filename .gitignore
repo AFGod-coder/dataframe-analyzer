@@ -3,3 +3,5 @@ utils.py
 
 train.csv
 clean_dataframe.csv
+
+__pycache__
