@@ -4,4 +4,20 @@ utils.py
 train.csv
 clean_dataframe.csv
 
-__pycache__
+__pycache__/
+*.pyc
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Variables de entorno
+.env
+
+# Editores / IDE
+.vscode/
+.idea/
+
+# Sistema
+.DS_Store
