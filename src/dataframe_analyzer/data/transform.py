@@ -41,7 +41,10 @@ class DataTransform:
                 format=format,
                 errors='coerce'
             )
-            logger.info(f"Column {column_date_name} converted to date")
+            invalid_dates = df[column_date_name].isna().sum()
+            logger.info(f"Column '{column_date_name}' converted to date ({invalid_dates} invalid value(s)).")
+        else:
+            logger.warning(f"Column '{column_date_name}' not found. Skipping date conversion.")
         return df
 
     @staticmethod
@@ -58,10 +61,12 @@ class DataTransform:
         """
         if part == DatePart.DAY:
             df['day_of_month'] = df[column_date_name].dt.day
+            logger.info("Added column 'day_of_month' from '%s'.", column_date_name)
         elif part == DatePart.MONTH:
             df['month'] = df[column_date_name].dt.month
+            logger.info("Added column 'month' from '%s'.", column_date_name)
         elif part == DatePart.YEAR:
             df['year'] = df[column_date_name].dt.year
-        logger.info(f"")
-        
+            logger.info("Added column 'year' from '%s'.", column_date_name)
+
         return df
