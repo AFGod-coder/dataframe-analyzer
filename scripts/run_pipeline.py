@@ -1,4 +1,5 @@
 import logging
+import os
 
 logging.basicConfig(
     level=logging.INFO,
@@ -6,24 +7,26 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
-from DataLoader import DataLoader
-from DataCleaner import DataCleaner
-from DataTransform import DataTransform, DatePart
+from dataframe_analyzer.data.loader import DataLoader
+from dataframe_analyzer.data.cleaner import DataCleaner
+from dataframe_analyzer.data.transform import DataTransform, DatePart
 
-FILE_PATH = "train.csv"
+FILE_PATH = "data/raw/train.csv"
+OUTPUT_PATH = "data/processed/clean_dataframe.csv"
 
 if __name__ == "__main__":
-    
+
     loader = DataLoader(FILE_PATH)
     df_raw = loader.load()
-    
+
     cleaner = DataCleaner()
     df_clean = cleaner.clean(df_raw)
-    
+
     df_clean = DataTransform.transform_to_date(df_clean, 'date')
     df_clean = DataTransform.add_date_part_column(df_clean, 'date', DatePart.DAY)
     df_clean = DataTransform.add_date_part_column(df_clean, 'date', DatePart.MONTH)
     df_clean = DataTransform.add_date_part_column(df_clean, 'date', DatePart.YEAR)
     df_clean = df_clean.drop(columns=['date'])
-    
-    df_clean.to_csv('clean_dataframe.csv', index=False)
+
+    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+    df_clean.to_csv(OUTPUT_PATH, index=False)

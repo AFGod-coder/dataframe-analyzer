@@ -1,0 +1,17 @@
+[project]
+name = "dataframe-analyzer"
+version = "0.1.0"
+description = "Demand Forecasting to Support Inventory Management in Retail Stores"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas",
+    "matplotlib",
+    "seaborn",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

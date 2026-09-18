@@ -1,11 +1,14 @@
 utils.md
-utils.py
 
-train.csv
-clean_dataframe.csv
+data/processed/
 
 __pycache__/
 *.pyc
+
+# Empaquetado
+*.egg-info/
+build/
+dist/
 
 # Entornos virtuales
 venv/
