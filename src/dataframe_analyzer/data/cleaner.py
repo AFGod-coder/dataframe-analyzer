@@ -1,14 +1,44 @@
+"""
+Removes duplicate rows and extra whitespace from a DataFrame.
+"""
+
 import logging
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 class DataCleaner:
+    """Cleans a DataFrame by removing duplicates and trimming text columns.
+
+    The DataFrame passed to `clean` is never changed in place. A new,
+    cleaned DataFrame is returned instead.
+    """
+
     def __init__(self, date_col: str = None, text_cols: list = None):
+        """Store cleaning configuration.
+
+        Args:
+            date_col (str, optional): Name of the date column. Reserved
+                for future use. Defaults to None.
+            text_cols (list, optional): Text columns to trim. If empty,
+                every text column is trimmed. Defaults to None.
+        """
         self.date_col = date_col
         self.text_cols = text_cols if text_cols is not None else []
 
     def clean(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Run the cleaning steps on a DataFrame.
+
+        Steps:
+            1. Remove exact duplicate rows.
+            2. Trim leading and trailing spaces from text columns.
+
+        Args:
+            df (pd.DataFrame): The DataFrame to clean.
+
+        Returns:
+            pd.DataFrame: A new, cleaned DataFrame.
+        """
         logger.info("Starting cleaning pipeline...")
         df_clean = df.copy()
         
@@ -24,6 +54,14 @@ class DataCleaner:
         return df_clean
     
     def _remove_string_spaces(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Trim leading and trailing spaces from text columns.
+
+        Args:
+            df (pd.DataFrame): The DataFrame to modify.
+
+        Returns:
+            pd.DataFrame: The DataFrame with trimmed text columns.
+        """
         if self.text_cols:
             for col in self.text_cols:
                 if col in df.columns and df[col].dtype == 'object':

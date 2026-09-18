@@ -1,6 +1,5 @@
 """
-DataTransform class.
-Provides static methods to convert and extract date parts from a DataFrame.
+Converts a column to dates and extracts date parts (day, month, year).
 """
 from enum import Enum
 import pandas as pd
@@ -9,31 +8,32 @@ import logging
 logger = logging.getLogger(__name__)
 
 class DatePart(Enum):
-    """
-    Enumeration for date parts.
-    """
+    """The part of a date that can be extracted into its own column."""
     DAY = 'day'
     MONTH = 'month'
     YEAR = 'year'
 
 
 class DataTransform:
-    """
-    Contains only static methods to transform date columns.
-    No internal state is stored.
+    """Static helpers to work with date columns.
+
+    All methods are static. This class does not store any state.
     """
     @staticmethod
     def transform_to_date(df: pd.DataFrame, column_date_name: str, format: str = None) -> pd.DataFrame:
-        """
-        Converts a column to datetime format.
+        """Convert a column to pandas datetime format.
 
-        Parameters:
+        Values that cannot be parsed become missing (NaT) instead of
+        raising an error.
+
+        Args:
             df (pd.DataFrame): The DataFrame to modify.
             column_date_name (str): Name of the column to convert.
-            format (str, optional): Specific date format. Default is None.
+            format (str, optional): Expected date format. If None,
+                pandas guesses the format. Defaults to None.
 
         Returns:
-            pd.DataFrame: The DataFrame with the converted column.
+            pd.DataFrame: The DataFrame with the column converted to dates.
         """
         if column_date_name in df.columns:
             df[column_date_name] = pd.to_datetime(
@@ -46,10 +46,9 @@ class DataTransform:
 
     @staticmethod
     def add_date_part_column(df: pd.DataFrame, column_date_name: str, part: DatePart) -> pd.DataFrame:
-        """
-        Adds a new column with the specified date part (day, month, or year).
+        """Add a new column with one part of a date column.
 
-        Parameters:
+        Args:
             df (pd.DataFrame): The DataFrame to modify.
             column_date_name (str): Name of the datetime column.
             part (DatePart): Which part to extract (DAY, MONTH, or YEAR).

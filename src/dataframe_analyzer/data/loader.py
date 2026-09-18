@@ -1,31 +1,26 @@
 """
-DataLoader class.
-Loads a CSV file from the given path.
+Loads a CSV file into a pandas DataFrame.
 """
 
 import os
 import pandas as pd
 
 class DataLoader:
-    """
-    Loads a CSV file and returns a pandas DataFrame.
-    """
+    """Loads a CSV file from disk and returns it as a DataFrame."""
 
     def __init__(self, file_path: str):
-        """
-        Saves the file path.
+        """Store the path to the CSV file.
 
-        Parameters:
+        Args:
             file_path (str): Path to the CSV file.
         """
         self.file_path = file_path
 
-    def load(self):
-        """
-        Loads the CSV file.
+    def load(self) -> pd.DataFrame:
+        """Read the CSV file and return its content.
 
         Returns:
-            pd.DataFrame: Data from the CSV file.
+            pd.DataFrame: The data loaded from the CSV file.
 
         Raises:
             FileNotFoundError: If the file does not exist.
@@ -34,8 +29,7 @@ class DataLoader:
         return pd.read_csv(self.file_path)
 
     def _validate_file_exists(self):
-        """
-        Checks if the file exists on disk.
+        """Check that the file exists on disk.
 
         Raises:
             FileNotFoundError: If the file is not found.
