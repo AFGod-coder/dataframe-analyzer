@@ -54,3 +54,18 @@ Reglas rápidas:
 - Nombres de clases en `PascalCase`, funciones y variables en `snake_case`.
 - Cada clase con una responsabilidad clara (ver `DataLoader`, `DataCleaner`, `DataTransform` como referencia).
 - Evita dejar código comentado o archivos de prueba sueltos en el commit final; usa `.gitignore` para lo que no debe versionarse.
+
+## Dónde va el código nuevo
+
+El proyecto sigue una estructura de paquete estándar de Python (`src/` layout):
+
+- `src/dataframe_analyzer/data/` — carga, limpieza y transformación de datos
+- `src/dataframe_analyzer/visualization/` — gráficas y utilidades de EDA
+- `src/dataframe_analyzer/reporting/` — generación de reportes
+- `src/dataframe_analyzer/pipeline.py` — orquesta el flujo completo usando los módulos anteriores
+- `scripts/` — puntos de entrada ejecutables (nunca lógica de negocio aquí, solo orquestación simple)
+- `data/raw/` — datasets de entrada, no se modifican
+- `data/processed/` — salidas generadas por el pipeline (no se versiona)
+- `tests/` — pruebas, con la misma sub-estructura que `src/dataframe_analyzer/`
+
+Nombres de archivo de módulos en `snake_case` (ej. `loader.py`, no `DataLoader.py`); el nombre de la clase adentro sí va en `PascalCase` (ej. `class DataLoader`).

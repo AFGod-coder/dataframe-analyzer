@@ -10,18 +10,32 @@ Analiza el historial de ventas de un comerciante para construir un modelo que pr
 
 ```
 .
-├── main.py            # Punto de entrada: orquesta carga, limpieza y transformación
-├── DataLoader.py       # Carga del dataset crudo (train.csv)
-├── DataCleaner.py      # Limpieza: normalización de texto y remoción de duplicados
-├── DataTransform.py    # Transformaciones de fecha y features derivadas
-├── train.csv           # Dataset de entrenamiento
-└── requirements.txt     # Dependencias del proyecto
+├── src/
+│   └── dataframe_analyzer/     # Paquete principal (código fuente)
+│       ├── pipeline.py          # Orquestador del flujo completo
+│       ├── data/                # Carga, limpieza y transformación
+│       │   ├── loader.py         # DataLoader
+│       │   ├── cleaner.py        # DataCleaner
+│       │   └── transform.py      # DataTransform, DatePart
+│       ├── visualization/       # Gráficas y utilidades de EDA
+│       │   ├── chart_strategy.py
+│       │   └── eda_utils.py
+│       └── reporting/           # Generación de reportes
+│           └── report_generator.py
+├── scripts/                    # Puntos de entrada ejecutables
+│   ├── run_pipeline.py          # Corre el pipeline principal (antes main.py)
+│   └── explore_customer_data.py # EDA sobre customer_shopping_data.csv
+├── data/
+│   ├── raw/                     # Datasets de entrada (train.csv, customer_shopping_data.csv)
+│   └── processed/               # Salidas generadas (no se versiona)
+├── tests/                      # Pruebas (pendiente)
+├── pyproject.toml              # Configuración del paquete instalable
+└── requirements.txt             # Dependencias del proyecto
 ```
 
 ## Requisitos
 
 - Python 3.10+
-- Dependencias listadas en `requirements.txt`
 
 ## Instalación
 
@@ -29,15 +43,26 @@ Analiza el historial de ventas de un comerciante para construir un modelo que pr
 python -m venv venv
 source venv/bin/activate  # En Windows: venv\Scripts\activate
 pip install -r requirements.txt
+pip install -e .
 ```
+
+`pip install -e .` instala el paquete `dataframe_analyzer` en modo editable, así los scripts pueden importarlo directamente sin configurar `PYTHONPATH`.
 
 ## Uso
 
+Desde la raíz del proyecto:
+
 ```bash
-python main.py
+python scripts/run_pipeline.py
 ```
 
-Esto carga `train.csv`, limpia los datos y genera `clean_dataframe.csv` con las columnas de fecha descompuestas (día, mes, año).
+Esto carga `data/raw/train.csv`, limpia los datos y genera `data/processed/clean_dataframe.csv` con las columnas de fecha descompuestas (día, mes, año).
+
+Para explorar el dataset de `customer_shopping_data.csv`:
+
+```bash
+python scripts/explore_customer_data.py
+```
 
 ## Estado del proyecto
 
