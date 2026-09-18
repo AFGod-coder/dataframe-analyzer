@@ -41,18 +41,17 @@ class DataCleaner:
         """
         logger.info("Starting cleaning pipeline...")
         df_clean = df.copy()
-        
+
         initial_rows = len(df_clean)
         df_clean = df_clean.drop_duplicates()
         removed = initial_rows - len(df_clean)
-        logger.info(f"Removed {removed} duplicate rows.")  
-        
-        
+        logger.info(f"Removed {removed} duplicate row(s).")
+
         df_clean = self._remove_string_spaces(df_clean)
-        logger.info(f"Removed unnecesary spaces in column type string.")  
+        logger.info("Trimmed extra spaces from text columns.")
         logger.info("Cleaning finished successfully.")
         return df_clean
-    
+
     def _remove_string_spaces(self, df: pd.DataFrame) -> pd.DataFrame:
         """Trim leading and trailing spaces from text columns.
 
