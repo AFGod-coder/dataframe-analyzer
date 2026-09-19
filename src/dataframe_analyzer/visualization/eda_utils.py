@@ -6,16 +6,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-def print_header(title):
-    """Print a title surrounded by a line of '=' characters.
-
-    Args:
-        title (str): Text to print as the section title.
-    """
-    print("\n" + "=" * 60)
-    print(title)
-    print("=" * 60)
-
 def plot_sales_chart(df, kind, x, y=None, title="", xlabel="", ylabel="", **kwargs):
     """Draw a quick chart (histogram or box plot) from a DataFrame.
 
@@ -38,7 +28,7 @@ def plot_sales_chart(df, kind, x, y=None, title="", xlabel="", ylabel="", **kwar
         sns.histplot(data=df, x=x, bins=kwargs.get("bins", 50), kde=True, color="skyblue", edgecolor="black")
     elif kind == "box":
         sns.boxplot(data=df, x=x, y=y, palette=kwargs.get("palette", "Set2"), fliersize=kwargs.get("fliersize", 5))
-        
+
     plt.title(title, fontsize=14, fontweight="bold")
     plt.xlabel(xlabel, fontsize=12)
     plt.ylabel(ylabel, fontsize=12)
