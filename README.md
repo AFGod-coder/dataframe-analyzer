@@ -16,7 +16,7 @@ Analiza el historial de ventas de un comerciante para construir un modelo que pr
 │       ├── data/                # Carga, limpieza y transformación
 │       │   ├── loader.py         # DataLoader
 │       │   ├── cleaner.py        # DataCleaner
-│       │   └── transform.py      # DataTransform, DatePart (día/mes/año, día de la semana, fin de semana, festivo)
+│       │   └── transform.py      # DataTransform, DatePart (día/mes/año, día de la semana, fin de semana; festivo disponible pero opt-in)
 │       ├── models/               # Modelos de forecasting
 │       │   └── prophet_model.py  # ProphetForecaster (split cronológico, entrenamiento, métricas)
 │       ├── visualization/       # Gráficas y utilidades de EDA
@@ -67,7 +67,8 @@ Esto carga `data/raw/train.csv`, limpia los datos y genera `data/processed/clean
 - `day_of_month`, `month`, `year`
 - `day_of_week` (0=lunes...6=domingo) y `day_of_week_name`
 - `is_weekend` (booleano)
-- `is_holiday` (booleano; usa el calendario de festivos de EE. UU. por defecto — ver nota en `DataTransform.add_holiday_flag`, pendiente de confirmar con la profesora el país correcto)
+
+`DataTransform.add_holiday_flag(df, 'date', country=...)` también existe, pero **no se llama por defecto**: el dataset (Kaggle "Store Item Demand Forecasting Challenge") no especifica el país/región de las 10 tiendas, así que asumir un calendario de festivos (EE. UU., Colombia, etc.) sería un supuesto no verificable. Si en algún momento se confirma la ubicación real, se puede llamar explícitamente con el código de país correspondiente.
 
 ### Análisis exploratorio (EDA)
 

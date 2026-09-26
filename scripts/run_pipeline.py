@@ -35,10 +35,14 @@ if __name__ == "__main__":
     df_clean = DataTransform.add_date_part_column(df_clean, 'date', DatePart.MONTH)
     df_clean = DataTransform.add_date_part_column(df_clean, 'date', DatePart.YEAR)
 
-    logger.info("Extracting weekday, weekend and holiday features...")
+    logger.info("Extracting weekday and weekend features...")
     df_clean = DataTransform.add_weekday_column(df_clean, 'date')
     df_clean = DataTransform.add_weekend_flag(df_clean, 'date')
-    df_clean = DataTransform.add_holiday_flag(df_clean, 'date', country="US")
+    # NOTE: is_holiday is intentionally NOT generated here. The source
+    # dataset does not specify which country/region the 10 stores belong
+    # to, so any holiday calendar would be an unverifiable assumption.
+    # DataTransform.add_holiday_flag(df, 'date', country=...) is available
+    # to call explicitly if the real store location is ever confirmed.
 
     df_clean = df_clean.drop(columns=['date'])
 
