@@ -24,3 +24,5 @@ env/
 
 # Sistema
 .DS_Store
+
+.streamlit/
