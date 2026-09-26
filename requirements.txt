@@ -2,3 +2,6 @@ pandas
 matplotlib
 seaborn
 holidays
+scikit-learn
+prophet
+plotly
