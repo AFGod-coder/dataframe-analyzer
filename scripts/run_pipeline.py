@@ -34,6 +34,12 @@ if __name__ == "__main__":
     df_clean = DataTransform.add_date_part_column(df_clean, 'date', DatePart.DAY)
     df_clean = DataTransform.add_date_part_column(df_clean, 'date', DatePart.MONTH)
     df_clean = DataTransform.add_date_part_column(df_clean, 'date', DatePart.YEAR)
+
+    logger.info("Extracting weekday, weekend and holiday features...")
+    df_clean = DataTransform.add_weekday_column(df_clean, 'date')
+    df_clean = DataTransform.add_weekend_flag(df_clean, 'date')
+    df_clean = DataTransform.add_holiday_flag(df_clean, 'date', country="US")
+
     df_clean = df_clean.drop(columns=['date'])
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
