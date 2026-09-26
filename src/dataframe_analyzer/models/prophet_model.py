@@ -19,7 +19,13 @@ logger = logging.getLogger(__name__)
 class ProphetForecaster:
     """Trains a Prophet model on a single store-item time series."""
 
-    def __init__(self, seasonality_mode: str = "multiplicative"):
+    def __init__(self, seasonality_mode: str = "multiplicative") -> None:
+        """Store the seasonality mode used when the model is trained.
+
+        Args:
+            seasonality_mode (str, optional): Prophet's seasonality_mode
+                ("additive" or "multiplicative"). Defaults to "multiplicative".
+        """
         self.seasonality_mode = seasonality_mode
         self.model = None
 
@@ -55,11 +61,14 @@ class ProphetForecaster:
         logger.info(f"Chronological cutoff: {cutoff.date()} | train={len(train)} rows, test={len(test)} rows")
         return train, test, cutoff
 
-    def fit(self, train: pd.DataFrame):
+    def fit(self, train: pd.DataFrame) -> Prophet:
         """Train the Prophet model on the training set.
 
         Args:
             train (pd.DataFrame): Training series with columns ds, y.
+
+        Returns:
+            Prophet: The fitted Prophet model (also stored in self.model).
         """
         self.model = Prophet(
             yearly_seasonality=True,
