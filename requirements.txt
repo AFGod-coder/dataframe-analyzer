@@ -5,3 +5,4 @@ holidays
 scikit-learn
 prophet
 plotly
+tensorflow
