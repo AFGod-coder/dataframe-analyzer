@@ -1,11 +1,15 @@
 """
-Converts a column to dates and extracts date parts (day, month, year).
+Converts a column to dates and extracts date parts (day, month, year,
+day of week, weekend flag, and holiday flag).
 """
 from enum import Enum
-import pandas as pd
 import logging
 
+import pandas as pd
+import holidays
+
 logger = logging.getLogger(__name__)
+
 
 class DatePart(Enum):
     """The part of a date that can be extracted into its own column."""
@@ -69,4 +73,76 @@ class DataTransform:
             df['year'] = df[column_date_name].dt.year
             logger.info("Added column 'year' from '%s'.", column_date_name)
 
+        return df
+
+    @staticmethod
+    def add_weekday_column(df: pd.DataFrame, column_date_name: str) -> pd.DataFrame:
+        """Add the day of the week as both a number and a name.
+
+        Adds two columns:
+            - 'day_of_week' (int): 0 = Monday ... 6 = Sunday (pandas convention).
+            - 'day_of_week_name' (str): the English weekday name (e.g. "Monday").
+
+        Args:
+            df (pd.DataFrame): The DataFrame to modify.
+            column_date_name (str): Name of the datetime column.
+
+        Returns:
+            pd.DataFrame: The DataFrame with the two new columns added.
+        """
+        if column_date_name in df.columns:
+            df['day_of_week'] = df[column_date_name].dt.weekday
+            df['day_of_week_name'] = df[column_date_name].dt.day_name()
+            logger.info("Added columns 'day_of_week' and 'day_of_week_name' from '%s'.", column_date_name)
+        else:
+            logger.warning("Column '%s' not found. Skipping weekday extraction.", column_date_name)
+        return df
+
+    @staticmethod
+    def add_weekend_flag(df: pd.DataFrame, column_date_name: str) -> pd.DataFrame:
+        """Add a boolean column marking Saturdays and Sundays.
+
+        Args:
+            df (pd.DataFrame): The DataFrame to modify.
+            column_date_name (str): Name of the datetime column.
+
+        Returns:
+            pd.DataFrame: The DataFrame with the new 'is_weekend' column.
+        """
+        if column_date_name in df.columns:
+            df['is_weekend'] = df[column_date_name].dt.weekday >= 5
+            logger.info("Added column 'is_weekend' from '%s'.", column_date_name)
+        else:
+            logger.warning("Column '%s' not found. Skipping weekend flag.", column_date_name)
+        return df
+
+    @staticmethod
+    def add_holiday_flag(df: pd.DataFrame, column_date_name: str, country: str = "US") -> pd.DataFrame:
+        """Add a boolean column marking public holidays.
+
+        NOTE: the dataset does not specify which country/region the stores
+        belong to, so this defaults to US federal holidays ("US"). Confirm
+        with the professor whether this assumption should be documented as
+        -is or replaced with the correct country code for the `holidays`
+        package (e.g. "CO" for Colombia).
+
+        Args:
+            df (pd.DataFrame): The DataFrame to modify.
+            column_date_name (str): Name of the datetime column.
+            country (str, optional): ISO country code accepted by the
+                `holidays` package. Defaults to "US".
+
+        Returns:
+            pd.DataFrame: The DataFrame with the new 'is_holiday' column.
+        """
+        if column_date_name in df.columns:
+            years = df[column_date_name].dt.year.dropna().unique().tolist()
+            country_holidays = holidays.country_holidays(country, years=years)
+            df['is_holiday'] = df[column_date_name].dt.date.isin(country_holidays)
+            logger.info(
+                "Added column 'is_holiday' from '%s' using '%s' calendar (%d holiday dates).",
+                column_date_name, country, len(country_holidays)
+            )
+        else:
+            logger.warning("Column '%s' not found. Skipping holiday flag.", column_date_name)
         return df
