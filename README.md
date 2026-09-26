@@ -16,18 +16,24 @@ Analiza el historial de ventas de un comerciante para construir un modelo que pr
 │       ├── data/                # Carga, limpieza y transformación
 │       │   ├── loader.py         # DataLoader
 │       │   ├── cleaner.py        # DataCleaner
-│       │   └── transform.py      # DataTransform, DatePart
+│       │   └── transform.py      # DataTransform, DatePart (día/mes/año, día de la semana, fin de semana, festivo)
+│       ├── models/               # Modelos de forecasting
+│       │   └── prophet_model.py  # ProphetForecaster (split cronológico, entrenamiento, métricas)
 │       ├── visualization/       # Gráficas y utilidades de EDA
 │       │   ├── chart_strategy.py
-│       │   └── eda_utils.py
+│       │   └── eda_utils.py      # EdaPlotter: histograma, boxplot, barras y línea, con guardado a PNG
 │       └── reporting/           # Generación de reportes
 │           └── report_generator.py
 ├── scripts/                    # Puntos de entrada ejecutables
 │   ├── run_pipeline.py          # Corre el pipeline principal (antes main.py)
+│   ├── eda_analysis.py          # EDA completo: balance del dataset + 4 gráficos (2.1)
+│   ├── run_prophet_simulation.py # Simulación con Prophet para una combinación tienda-producto
 │   └── explore_customer_data.py # EDA sobre customer_shopping_data.csv
 ├── data/
 │   ├── raw/                     # Datasets de entrada (train.csv, customer_shopping_data.csv)
 │   └── processed/               # Salidas generadas (no se versiona)
+├── reports/
+│   └── figures/eda/             # Gráficos PNG generados por eda_analysis.py (para el artículo)
 ├── tests/                      # Pruebas (pendiente)
 ├── pyproject.toml              # Configuración del paquete instalable
 └── requirements.txt             # Dependencias del proyecto
@@ -56,7 +62,37 @@ Desde la raíz del proyecto:
 python scripts/run_pipeline.py
 ```
 
-Esto carga `data/raw/train.csv`, limpia los datos y genera `data/processed/clean_dataframe.csv` con las columnas de fecha descompuestas (día, mes, año).
+Esto carga `data/raw/train.csv`, limpia los datos y genera `data/processed/clean_dataframe.csv` con las siguientes columnas derivadas de `date`:
+
+- `day_of_month`, `month`, `year`
+- `day_of_week` (0=lunes...6=domingo) y `day_of_week_name`
+- `is_weekend` (booleano)
+- `is_holiday` (booleano; usa el calendario de festivos de EE. UU. por defecto — ver nota en `DataTransform.add_holiday_flag`, pendiente de confirmar con la profesora el país correcto)
+
+### Análisis exploratorio (EDA)
+
+Una vez generado `clean_dataframe.csv`, corre el EDA completo del punto 2.1 (Dataset Construction):
+
+```bash
+python scripts/eda_analysis.py
+```
+
+Esto verifica que el dataset esté balanceado (mismas filas por cada combinación tienda-producto) y genera 4 gráficos en `reports/figures/eda/`:
+
+- `sales_by_store.png` — ventas totales por tienda (barras verticales)
+- `sales_by_product.png` — ventas totales por producto (barras horizontales, por ser 50 categorías)
+- `sales_trend_monthly.png` — tendencia y estacionalidad mensual (línea)
+- `sales_by_weekday.png` — ventas promedio por día de la semana
+
+Las gráficas se generan con la clase `EdaPlotter` (`src/dataframe_analyzer/visualization/eda_utils.py`), que centraliza histogramas, boxplots, barras y líneas con un estilo consistente y guardado opcional a PNG (`save_path`).
+
+### Simulación con Prophet
+
+```bash
+python scripts/run_prophet_simulation.py
+```
+
+Entrena un modelo Prophet para una combinación tienda-producto (configurable en el script), con split cronológico train/test y métricas MAE, RMSE y MAPE.
 
 Para explorar el dataset de `customer_shopping_data.csv`:
 
