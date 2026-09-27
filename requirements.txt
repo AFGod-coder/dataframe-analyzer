@@ -5,3 +5,5 @@ holidays
 scikit-learn
 prophet
 plotly
+xgboost
+numpy
