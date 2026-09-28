@@ -7,3 +7,6 @@ prophet
 plotly
 xgboost
 numpy
+tensorflow
+streamlit
+-e .
