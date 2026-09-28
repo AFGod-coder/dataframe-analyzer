@@ -18,6 +18,7 @@ import pandas as pd
 from dataframe_analyzer.data.cleaner import DataCleaner
 from dataframe_analyzer.data.loader import DataLoader
 from dataframe_analyzer.models.prophet_model import ProphetForecaster
+from dataframe_analyzer.service.adapters import LSTMAdapter, RandomForestAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 # selector reads this dict automatically.
 MODEL_REGISTRY = {
     "Prophet": ProphetForecaster,
+    "Random Forest": RandomForestAdapter,
+    "LSTM": LSTMAdapter,
 }
 
 DEFAULT_MODEL = "Prophet"
