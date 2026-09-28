@@ -5,6 +5,13 @@ Given a series with columns [date, sales] (already filtered for a
 specific store-item combination), this module handles scaling,
 windowing, the chronological split, training, prediction and metric
 calculation.
+
+Two evaluation protocols are supported:
+    - One-step-ahead (`predict`): each test day is predicted from the 30
+    previous REAL days. Comparable with the tree-based models.
+    - Recursive multi-step (`predict_recursive`): the whole test horizon is
+    forecast without seeing any real sales from the test period (each
+    prediction feeds the next window). Comparable with Prophet.
 """
 
 import logging
@@ -57,19 +64,28 @@ class LSTMForecaster:
         serie["date"] = pd.to_datetime(serie["date"])
         return serie.sort_values("date").reset_index(drop=True)
 
-    def scale(self, serie: pd.DataFrame) -> np.ndarray:
-        """Scale sales values to [0, 1]. LSTM is sensitive to input scale,
-        unlike the tree-based models (XGBoost, Random Forest).
+    def scale(self, serie: pd.DataFrame, test_days: int = 90) -> np.ndarray:
+        """Scale sales values to [0, 1] fitting the scaler ONLY on the training
+        period, so no information from the test period (min/max) leaks into
+        the normalization. The test values are transformed with the scaler
+        fitted on train (they may fall slightly outside [0, 1], which is fine).
+
+        LSTM is sensitive to input scale, unlike the tree-based models
+        (XGBoost, Random Forest).
 
         Args:
             serie (pd.DataFrame): Series with column sales.
+            test_days (int): Number of trailing days reserved for testing.
+                They are excluded when fitting the scaler.
 
         Returns:
-            np.ndarray: Scaled values, shape (n, 1).
+            np.ndarray: Scaled values of the whole series, shape (n, 1).
         """
-        self.scaler = MinMaxScaler()
         values = serie["sales"].values.reshape(-1, 1)
-        return self.scaler.fit_transform(values)
+        train_values = values[:-test_days] if test_days > 0 else values
+        self.scaler = MinMaxScaler()
+        self.scaler.fit(train_values)
+        return self.scaler.transform(values)
 
     def create_windows(self, scaled_values: np.ndarray):
         """Build sliding windows: use `window` past days to predict the next one.
@@ -107,10 +123,15 @@ class LSTMForecaster:
     def fit(self, X_train: np.ndarray, y_train: np.ndarray):
         """Train the LSTM model.
 
+        The seed is reset before building the network so that each series
+        is reproducible on its own, independently of the order in which
+        series are processed.
+
         Args:
             X_train (np.ndarray): Training input windows.
             y_train (np.ndarray): Training targets.
         """
+        tf.keras.utils.set_random_seed(SEED)
         self.model = Sequential([
             Input(shape=(self.window, 1)),
             LSTM(50, activation="tanh"),
@@ -121,7 +142,10 @@ class LSTMForecaster:
         return self.model
 
     def predict(self, X_test: np.ndarray) -> np.ndarray:
-        """Predict and inverse-transform back to real sales units.
+        """One-step-ahead prediction, inverse-transformed to real sales units.
+
+        Each test day is predicted from the `window` previous REAL days
+        (including real days that belong to the test period).
 
         Args:
             X_test (np.ndarray): Test input windows.
@@ -131,6 +155,33 @@ class LSTMForecaster:
         """
         pred_scaled = self.model.predict(X_test, verbose=0)
         return self.scaler.inverse_transform(pred_scaled).flatten()
+
+    def predict_recursive(self, scaled_values: np.ndarray, test_days: int = 90) -> np.ndarray:
+        """Recursive multi-step forecast over the whole test horizon.
+
+        Starts from the last `window` days BEFORE the test period and
+        predicts `test_days` days ahead. Each prediction is appended to the
+        window and used to predict the next day, so no real sales from the
+        test period are ever seen. This is the same protocol used by Prophet
+        (train until the cutoff, then forecast the whole horizon).
+
+        Args:
+            scaled_values (np.ndarray): Scaled values of the whole series, shape (n, 1).
+            test_days (int): Forecast horizon in days.
+
+        Returns:
+            np.ndarray: Forecast for the test period (real scale), shape (test_days,).
+        """
+        history = scaled_values[:-test_days, 0]
+        window_values = list(history[-self.window:])
+        preds_scaled = []
+        for _ in range(test_days):
+            x = np.array(window_values[-self.window:]).reshape(1, self.window, 1)
+            next_scaled = float(self.model(x, training=False).numpy()[0, 0])
+            preds_scaled.append(next_scaled)
+            window_values.append(next_scaled)
+        preds = np.array(preds_scaled).reshape(-1, 1)
+        return self.scaler.inverse_transform(preds).flatten()
 
     def inverse_transform_y(self, y_scaled: np.ndarray) -> np.ndarray:
         """Inverse-transform the scaled test targets back to real sales units.
