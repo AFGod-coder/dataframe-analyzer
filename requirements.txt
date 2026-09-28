@@ -6,3 +6,5 @@ scikit-learn
 prophet
 plotly
 tensorflow
+streamlit
+-e .
