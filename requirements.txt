@@ -5,6 +5,8 @@ holidays
 scikit-learn
 prophet
 plotly
+xgboost
+numpy
 tensorflow
 streamlit
 -e .
