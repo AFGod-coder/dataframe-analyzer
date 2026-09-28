@@ -6,3 +6,4 @@ scikit-learn
 prophet
 plotly
 streamlit
+-e .
