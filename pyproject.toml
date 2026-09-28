@@ -8,6 +8,10 @@ dependencies = [
     "matplotlib",
     "seaborn",
     "holidays",
+    "scikit-learn",
+    "prophet",
+    "plotly",
+    "streamlit",
 ]
 
 [build-system]

@@ -29,6 +29,8 @@ Analiza el historial de ventas de un comerciante para construir un modelo que pr
 │   ├── eda_analysis.py          # EDA completo: balance del dataset + 4 gráficos (2.1)
 │   ├── run_prophet_simulation.py # Simulación con Prophet para una combinación tienda-producto
 │   └── explore_customer_data.py # EDA sobre customer_shopping_data.csv
+├── webapp/
+│   └── app.py                   # Demo web (Streamlit) — sección 2.5 Application Implementation
 ├── data/
 │   ├── raw/                     # Datasets de entrada (train.csv, customer_shopping_data.csv)
 │   └── processed/               # Salidas generadas (no se versiona)
@@ -100,6 +102,16 @@ Para explorar el dataset de `customer_shopping_data.csv`:
 ```bash
 python scripts/explore_customer_data.py
 ```
+
+### Demo web (sección 2.5 - Application Implementation)
+
+```bash
+streamlit run webapp/app.py
+```
+
+Abre una página local donde eliges tienda, producto y horizonte de pronóstico, y ves el resultado gráfico junto con las métricas de error (MAE, RMSE, MAPE). Por ahora usa `ProphetForecaster` (el único modelo listo); cuando la sección 2.3 defina cuál de los 4 modelos comparados gana, basta con registrarlo en `MODEL_REGISTRY` (`src/dataframe_analyzer/service/forecast_service.py`) para que aparezca en el selector de la app, sin tocar el resto del código.
+
+La app lee `data/raw/train.csv` directamente (no el CSV ya procesado por el pipeline), porque Prophet necesita la columna `date` original y el pipeline la descompone/elimina.
 
 ## Estado del proyecto
 
