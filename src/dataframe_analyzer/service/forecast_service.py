@@ -17,6 +17,8 @@ import pandas as pd
 
 from dataframe_analyzer.data.cleaner import DataCleaner
 from dataframe_analyzer.data.loader import DataLoader
+from dataframe_analyzer.models.arima_model import ArimaForecaster
+from dataframe_analyzer.models.exponential_smoothing_model import ExponentialSmoothingForecaster
 from dataframe_analyzer.models.prophet_model import ProphetForecaster
 from dataframe_analyzer.service.adapters import LSTMAdapter, RandomForestAdapter, XGBoostAdapter
 
@@ -30,6 +32,11 @@ MODEL_REGISTRY = {
     "Random Forest": RandomForestAdapter,
     "XGBoost": XGBoostAdapter,
     "LSTM": LSTMAdapter,
+    # Modelos de continuidad con el Marco Teorico del Hito 1 (no son los
+    # 4 "oficiales" de la rubrica de 2.2, pero se mantienen disponibles
+    # en la app y en la comparacion de 2.3 como benchmark historico).
+    "ARIMA": ArimaForecaster,
+    "Suavizado Exponencial": ExponentialSmoothingForecaster,
 }
 
 DEFAULT_MODEL = "Prophet"
