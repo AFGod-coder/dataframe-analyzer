@@ -12,6 +12,9 @@ dependencies = [
     "prophet",
     "plotly",
     "streamlit",
+    "xgboost",
+    "tensorflow",
+    "numpy",
 ]
 
 [build-system]
