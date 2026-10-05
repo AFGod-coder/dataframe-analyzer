@@ -15,6 +15,7 @@ dependencies = [
     "xgboost",
     "tensorflow",
     "numpy",
+    "statsmodels",
 ]
 
 [build-system]
