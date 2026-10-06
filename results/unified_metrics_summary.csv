@@ -1,0 +1,9 @@
+,MAE,MAE,MAE,RMSE,RMSE,RMSE,MAPE,MAPE,MAPE,es_oficial_rubrica_2.2
+,mean,median,std,mean,median,std,mean,median,std,
+model,,,,,,,,,,
+ARIMA,11.387,11.338,4.484,13.941,13.882,5.521,25.467,25.377,3.858,No (benchmark Hito 1)
+LSTM,11.676,10.089,6.734,14.591,12.326,8.426,23.688,22.586,7.525,Si
+Prophet,6.408,6.468,1.841,8.0,8.13,2.267,13.473,12.619,3.493,Si
+Random Forest,7.205,6.844,2.374,9.01,8.418,2.898,14.9,14.053,3.676,Si
+Suavizado Exponencial,10.58,10.34,4.13,13.204,12.93,5.263,23.576,23.372,4.444,No (benchmark Hito 1)
+XGBoost,7.43,6.883,2.402,9.314,8.751,2.95,14.565,13.426,3.64,Si
