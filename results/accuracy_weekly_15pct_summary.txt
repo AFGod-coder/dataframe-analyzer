@@ -1,0 +1,6 @@
+Modelo: Prophet
+Granularidad: semanal (suma de ventas reales vs. pronosticadas)
+Banda de tolerancia: +/-15%
+Semanas evaluadas: 663
+Semanas dentro de la banda: 641
+Precision: 96.68%
