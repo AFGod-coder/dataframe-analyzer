@@ -4,7 +4,7 @@ models.
 
 The web app never talks to a model class directly. It always goes
 through `ForecastService`, so that once section 2.3 decides which of
-the 4 compared models performs best, only MODEL_REGISTRY below needs to
+the models compared performs best, only MODEL_REGISTRY below needs to
 change (or a new default_model argument) -- no UI code has to be
 rewritten.
 """
@@ -17,22 +17,27 @@ import pandas as pd
 
 from dataframe_analyzer.data.cleaner import DataCleaner
 from dataframe_analyzer.data.loader import DataLoader
+from dataframe_analyzer.models.ensemble_model import EnsembleForecaster
 from dataframe_analyzer.models.prophet_model import ProphetForecaster
 from dataframe_analyzer.service.adapters import LSTMAdapter, RandomForestAdapter, XGBoostAdapter
 
 logger = logging.getLogger(__name__)
 
-# Pluggable model registry. Add new entries here (e.g. "SARIMA": SarimaForecaster)
-# once section 2.3 implements and validates them; the web app's model
-# selector reads this dict automatically.
+# Pluggable model registry. The web app's model selector reads this dict
+# automatically. "Ensemble (Fusionado)" is the model formalized in
+# section 2.4 (100 pts) and the one the app (2.5) uses by default --
+# it fuses the 4 base models below via a trained meta-model (stacking),
+# per the professor's clarification that "el modelo matematico" (singular)
+# should be one consolidated model, not 4 parallel candidates.
 MODEL_REGISTRY = {
+    "Ensemble (Fusionado)": EnsembleForecaster,
     "Prophet": ProphetForecaster,
     "Random Forest": RandomForestAdapter,
     "XGBoost": XGBoostAdapter,
     "LSTM": LSTMAdapter,
 }
 
-DEFAULT_MODEL = "Prophet"
+DEFAULT_MODEL = "Ensemble (Fusionado)"
 DEFAULT_BACKTEST_DAYS = 90
 
 
