@@ -84,6 +84,34 @@ class ForecastService:
         self._df = DataCleaner().clean(df_raw)
         logger.info(f"ForecastService loaded {len(self._df)} rows from {data_path}")
 
+    @classmethod
+    def from_dataframe(cls, df: pd.DataFrame) -> "ForecastService":
+        """Build a service over an in-memory dataset instead of a CSV path.
+
+        Used by the app's upload flow: the user's file is validated and
+        normalized by `dataframe_analyzer.data.sales_upload` into the same
+        date/store/item/sales schema, then served through exactly the
+        same forecasting code path as the project dataset.
+
+        Args:
+            df (pd.DataFrame): Columns date, store, item, sales -- one row
+                per store-item-day, with no gaps.
+
+        Returns:
+            ForecastService: a service instance over `df`.
+
+        Raises:
+            ValueError: if a required column is missing.
+        """
+        missing = {"date", "store", "item", "sales"} - set(df.columns)
+        if missing:
+            raise ValueError(f"Missing columns for ForecastService: {sorted(missing)}")
+        service = cls.__new__(cls)
+        service.data_path = None
+        service._df = DataCleaner().clean(df[["date", "store", "item", "sales"]])
+        logger.info(f"ForecastService built from an in-memory dataset of {len(service._df)} rows")
+        return service
+
     def list_stores(self) -> list:
         """Return the sorted list of available store ids."""
         return sorted(self._df["store"].unique().tolist())
@@ -108,7 +136,7 @@ class ForecastService:
             horizon_days (int): How many days beyond the last known date
                 to forecast.
             model_name (str, optional): Key into MODEL_REGISTRY. Defaults
-                to DEFAULT_MODEL ("Prophet").
+                to DEFAULT_MODEL ("Ensemble (Fusionado)").
             backtest_days (int, optional): Size of the held-out window
                 used to compute MAE/RMSE/MAPE. Defaults to 90.
 
