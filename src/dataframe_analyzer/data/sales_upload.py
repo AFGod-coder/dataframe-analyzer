@@ -1,34 +1,33 @@
-"""
-Validation and normalization of a sales file uploaded by an end user.
+"""Check and clean a sales file that a user uploads.
 
-The forecasting models in this project expect, for each store-product
-pair, a CONTINUOUS DAILY series (one row per calendar day): Random
-Forest/XGBoost build lag features with `shift()`, and the LSTM builds
-sliding windows, both of which assume consecutive rows are consecutive
-days. Real sales exports rarely look like that -- they usually have one
-row per sale (several rows per day), skip days with no sales, use their
-own column names and mix date formats. This module turns such a file
-into the exact schema the rest of the project already uses
-(`date, store, item, sales`), and reports every problem it finds in
-plain language so the user can fix their file.
+The models need one daily series for each store and product, with one
+row for every calendar day. Random Forest and XGBoost use lag features
+made with `shift()`, and the LSTM uses sliding windows. Both expect that
+two rows next to each other are two days next to each other.
 
-Expected file structure (documented to the user in the app, and shipped
-as a downloadable template by `build_template_excel()`):
+Real sales files are usually different. They often have one row for each
+sale, they skip days without sales, they use other column names and they
+mix date formats. This module changes such a file into the same columns
+that the rest of the project uses (`date`, `store`, `item`, `sales`). It
+also reports every problem in simple words, so the user can fix the file.
+
+Expected file structure (the app shows it, and `build_template_excel()`
+creates a template that the user can download):
 
     | fecha      | tienda    | producto     | cantidad_vendida |
     |------------|-----------|--------------|------------------|
     | 2025-01-02 | Centro    | Arroz 1kg    | 14               |
 
-    - fecha (required): sale date. Accepts YYYY-MM-DD, DD/MM/YYYY or a
-      native Excel date cell.
-    - producto (required): product name or code.
-    - cantidad_vendida (required): units sold (number >= 0).
-    - tienda (optional): store/branch name. If missing, every row is
-      assigned to a single store.
+    - `fecha` (required): date of the sale. Formats: YYYY-MM-DD,
+      DD/MM/YYYY or an Excel date cell.
+    - `producto` (required): product name or code.
+    - `cantidad_vendida` (required): units sold (a number >= 0).
+    - `tienda` (optional): store name. If the column is missing, all rows
+      go to one store.
 
-Column names are matched case-insensitively, ignoring accents and
-spaces, and common synonyms are accepted (e.g. "date", "sku", "ventas",
-"unidades", "sucursal").
+Column names are compared without case, accents or spaces, and common
+other names are accepted (for example `date`, `sku`, `ventas`,
+`unidades`, `sucursal`).
 """
 
 import io
@@ -40,24 +39,24 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Minimum days of history (first to last date, after filling gaps) a
-# product needs before it can be forecast. Below this, the Ensemble
-# cannot carve out a separate validation window for its fusion weights
-# AND still leave the lag/window-based models (lags up to 30 days, LSTM
-# window of 30 days) enough rows to train on.
+# Minimum number of days of history (from the first to the last date,
+# after filling gaps) that a product needs before we can forecast it.
+# With less data, the ensemble cannot keep a separate validation window
+# for its weights and still give the lag and window models (lags and LSTM
+# window of up to 30 days) enough rows to train.
 MIN_HISTORY_DAYS = 120
 
-# Recommended history. Prophet fits yearly seasonality only when a
-# training slice spans >= 365 days, and the Ensemble trains its base
-# models on slices shorter than the full history (minus the evaluation
-# window and the fusion-weight validation window, up to 90 days each).
-# With 2 years, every one of those slices still covers a full year.
+# Recommended history. Prophet uses yearly seasonality only when the
+# training data covers at least 365 days. The ensemble trains its base
+# models on less than the full history (it removes the test window and
+# the weight validation window, up to 90 days each). With 2 years of
+# data, every training part still covers a full year.
 RECOMMENDED_HISTORY_DAYS = 730
 
 DEFAULT_STORE_NAME = "Única"
 
-# canonical column -> accepted synonyms (already normalized: lowercase,
-# no accents, spaces/hyphens as underscores)
+# Standard column name -> accepted names (already normalized: lowercase,
+# no accents, spaces and hyphens changed to underscores).
 COLUMN_ALIASES = {
     "date": ["fecha", "date", "dia", "fecha_venta", "fecha_de_venta"],
     "item": ["producto", "item", "product", "sku", "articulo", "referencia", "codigo_producto"],
@@ -78,27 +77,31 @@ SPANISH_NAMES = {
 
 
 class SalesFileError(ValueError):
-    """Raised when the uploaded file cannot be turned into a usable dataset.
+    """Error raised when the uploaded file cannot become a usable dataset.
 
-    The message is meant to be shown directly to a non-technical user.
+    The message is written for a non-technical user, so the app can show
+    it directly.
     """
 
 
 @dataclass
 class UploadReport:
-    """Everything the app needs to show after processing an uploaded file.
+    """Result of processing an uploaded file, ready to show in the app.
 
     Attributes:
-        data (pd.DataFrame): Normalized daily dataset with columns
-            date, store, item, sales (one row per store-item-day, gaps
-            filled with 0).
-        products (pd.DataFrame): One row per store-item pair with its
-            history summary and whether it can be forecast.
-        warnings (list[str]): Non-blocking issues, in plain Spanish.
-        rows_read (int): Rows in the original file.
-        rows_discarded (int): Rows dropped because of invalid values.
-        duplicate_rows_aggregated (int): Rows merged because they shared
-            the same day, store and product (e.g. one row per sale).
+        data (pd.DataFrame): Clean daily dataset with the columns `date`,
+            `store`, `item` and `sales`. It has one row for each store,
+            item and day, and missing days have 0 sales.
+        products (pd.DataFrame): One row for each store and item, with a
+            summary of its history and a flag that says if it can be
+            forecast.
+        warnings (list[str]): Problems that do not stop the process,
+            written for the user in Spanish.
+        rows_read (int): Number of rows in the original file.
+        rows_discarded (int): Rows removed because of invalid values.
+        duplicate_rows_aggregated (int): Rows added together because they
+            had the same day, store and product (for example, one row for
+            each sale).
         days_filled (int): Calendar days added with 0 sales.
     """
     data: pd.DataFrame
@@ -111,7 +114,15 @@ class UploadReport:
 
 
 def _normalize_name(name) -> str:
-    """Lowercase, strip accents, and turn spaces/hyphens into underscores."""
+    """Normalize a column name so it can be compared with known names.
+
+    Args:
+        name: Original column name. Any value is changed to text first.
+
+    Returns:
+        str: The name in lowercase, without accents, and with spaces and
+        hyphens changed to underscores.
+    """
     text = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode("ascii")
     return "_".join(text.strip().lower().replace("-", " ").split())
 
@@ -120,24 +131,26 @@ def read_sales_file(file_bytes: bytes, filename: str) -> pd.DataFrame:
     """Read an uploaded .xlsx or .csv file into a raw DataFrame.
 
     Args:
-        file_bytes (bytes): Raw content of the uploaded file.
-        filename (str): Original file name, used to pick the reader.
+        file_bytes (bytes): Content of the uploaded file.
+        filename (str): Original file name. Its extension decides how the
+            file is read.
 
     Returns:
-        pd.DataFrame: The file content, columns untouched.
+        pd.DataFrame: The file content, with the original columns.
 
     Raises:
-        SalesFileError: If the format is unsupported or the file cannot be read.
+        SalesFileError: If the format is not supported or the file cannot
+            be read.
     """
     name = filename.lower()
     try:
         if name.endswith(".xlsx"):
-            # The template's instructions live in a second sheet, so
-            # always read the first one.
+            # The template keeps its instructions in the second sheet, so
+            # we always read the first sheet.
             return pd.read_excel(io.BytesIO(file_bytes), sheet_name=0)
         if name.endswith(".csv"):
             text = file_bytes.decode("utf-8-sig", errors="replace")
-            # Excel in Spanish locales often exports CSV with ';'.
+            # Excel with Spanish settings often saves CSV files with ';'.
             sep = ";" if text.splitlines()[0].count(";") > text.splitlines()[0].count(",") else ","
             return pd.read_csv(io.StringIO(text), sep=sep)
     except Exception as exc:  # pragma: no cover - depends on the user's file
@@ -146,10 +159,18 @@ def read_sales_file(file_bytes: bytes, filename: str) -> pd.DataFrame:
 
 
 def _map_columns(raw: pd.DataFrame) -> dict:
-    """Return {original_column: canonical_column} for recognized columns.
+    """Find which columns of the file are the date, store, item and sales.
+
+    Args:
+        raw (pd.DataFrame): Table as read from the user's file.
+
+    Returns:
+        dict: Map from each recognized original column name to its
+        standard name (`date`, `store`, `item` or `sales`).
 
     Raises:
-        SalesFileError: If a required column is missing or ambiguous.
+        SalesFileError: If a required column is missing, or if more than
+            one column matches the same standard name.
     """
     normalized = {col: _normalize_name(col) for col in raw.columns}
     mapping = {}
@@ -176,7 +197,18 @@ def _map_columns(raw: pd.DataFrame) -> dict:
 
 
 def _parse_dates(series: pd.Series) -> pd.Series:
-    """Parse dates written as Excel dates, ISO (YYYY-MM-DD) or DD/MM/YYYY."""
+    """Convert a column of dates written in different formats.
+
+    Accepted formats are Excel date cells, YYYY-MM-DD (with or without a
+    time), DD/MM/YYYY and DD-MM-YYYY.
+
+    Args:
+        series (pd.Series): Column with the dates from the file.
+
+    Returns:
+        pd.Series: Dates as datetime values. Values that cannot be read
+        are `NaT`.
+    """
     if pd.api.types.is_datetime64_any_dtype(series):
         return series
     text = series.astype(str).str.strip()
@@ -188,13 +220,20 @@ def _parse_dates(series: pd.Series) -> pd.Series:
 
 
 def _parse_quantities(series: pd.Series) -> pd.Series:
-    """Parse quantities, accepting decimal commas written as text.
+    """Convert a column of quantities, also when they use decimal commas.
 
-    "14", "14.5" and 14 are read as-is. A value containing a comma is
-    read in the Spanish style: "1.234,5" -> 1234.5 and "14,5" -> 14.5.
+    The values "14", "14.5" and 14 are read as they are. A value with a
+    comma is read in the Spanish style: "1.234,5" becomes 1234.5 and
+    "14,5" becomes 14.5.
+
+    Args:
+        series (pd.Series): Column with the quantities from the file.
+
+    Returns:
+        pd.Series: Numbers as floats. Values that cannot be read are NaN.
     """
-    # Checked as "is numeric" rather than "is object": in pandas >= 3 text
-    # columns use the dedicated `str` dtype instead of `object`.
+    # We check "is numeric" and not "is object" because in pandas 3 and
+    # later, text columns use the `str` dtype instead of `object`.
     if pd.api.types.is_numeric_dtype(series):
         return pd.to_numeric(series, errors="coerce")
     text = series.astype(str).str.strip()
@@ -204,27 +243,30 @@ def _parse_quantities(series: pd.Series) -> pd.Series:
 
 
 def normalize_sales(raw: pd.DataFrame) -> UploadReport:
-    """Validate a raw sales table and turn it into a continuous daily dataset.
+    """Check a sales table and change it into a continuous daily dataset.
 
     Steps:
-        1. Map the user's column names to date/store/item/sales.
-        2. Parse dates and quantities; discard rows that cannot be parsed
-           (reported as a warning, not a crash).
-        3. Aggregate rows sharing the same day, store and product (so a
-           transaction-level export works as-is).
-        4. Fill missing calendar days with 0 sales, per store-product,
-           between its first and last recorded date.
-        5. Summarize each store-product pair and flag whether it has
-           enough history to be forecast.
+        1. Match the user's column names to `date`, `store`, `item` and
+           `sales`.
+        2. Read dates and quantities. Rows that cannot be read are
+           removed and reported as a warning (the process does not stop).
+        3. Add together rows with the same day, store and product, so a
+           file with one row for each sale also works.
+        4. For each store and product, add the missing calendar days
+           between the first and the last date, with 0 sales.
+        5. Summarize each store and product, and mark if it has enough
+           history to be forecast.
 
     Args:
-        raw (pd.DataFrame): The table as read from the user's file.
+        raw (pd.DataFrame): Table as read from the user's file.
 
     Returns:
-        UploadReport: normalized data + per-product summary + warnings.
+        UploadReport: Clean data, a summary for each product and the
+        warnings.
 
     Raises:
-        SalesFileError: If nothing usable remains after validation.
+        SalesFileError: If the table is empty, if no valid row remains, or
+            if no product has enough history.
     """
     if raw is None or raw.empty:
         raise SalesFileError("El archivo está vacío.")
@@ -321,15 +363,18 @@ def normalize_sales(raw: pd.DataFrame) -> UploadReport:
 
 
 def summarize_products(data: pd.DataFrame) -> pd.DataFrame:
-    """One row per store-product pair with its history summary.
+    """Build a history summary with one row for each store and product.
 
     Args:
-        data (pd.DataFrame): Normalized daily dataset (date, store, item, sales).
+        data (pd.DataFrame): Clean daily dataset with the columns `date`,
+            `store`, `item` and `sales`.
 
     Returns:
-        pd.DataFrame: columns tienda, producto, fecha_inicio, fecha_fin,
-        dias_historia, unidades_totales, promedio_diario,
-        dias_con_venta_pct, apto.
+        pd.DataFrame: Summary with the columns `tienda`, `producto`,
+        `fecha_inicio`, `fecha_fin`, `dias_historia`, `unidades_totales`,
+        `promedio_diario`, `dias_con_venta_pct` and `apto`. The column
+        `apto` is True when the product has enough history. Rows that can
+        be forecast come first, ordered by total units.
     """
     grouped = data.groupby(["store", "item"])
     summary = grouped.agg(
@@ -348,16 +393,29 @@ def summarize_products(data: pd.DataFrame) -> pd.DataFrame:
 
 
 def process_upload(file_bytes: bytes, filename: str) -> UploadReport:
-    """Convenience wrapper: read + normalize in one call."""
+    """Read an uploaded file and clean it in one step.
+
+    Args:
+        file_bytes (bytes): Content of the uploaded file.
+        filename (str): Original file name (.xlsx or .csv).
+
+    Returns:
+        UploadReport: Clean data, a summary for each product and the
+        warnings.
+
+    Raises:
+        SalesFileError: If the file cannot be read or has no usable data.
+    """
     return normalize_sales(read_sales_file(file_bytes, filename))
 
 
 def build_template_excel() -> bytes:
-    """Build the downloadable Excel template (example data + instructions).
+    """Create the Excel template that the user can download.
 
     Returns:
-        bytes: An .xlsx file with a 'ventas' sheet (example rows in the
-        exact expected structure) and an 'instrucciones' sheet.
+        bytes: An .xlsx file with two sheets. The sheet `ventas` has
+        example rows with the expected structure, and the sheet
+        `instrucciones` explains each column.
     """
     dates = pd.date_range("2025-01-01", periods=6, freq="D")
     example = pd.DataFrame({
@@ -398,19 +456,21 @@ def build_template_excel() -> bytes:
 
 
 def project_dataset_to_template(df_project: pd.DataFrame, store: int, items: list, last_days: int = 730) -> pd.DataFrame:
-    """Turn a slice of the project's Kaggle dataset into the upload template format.
+    """Change part of the project dataset into the upload template format.
 
-    Used by the app's "use example data" button, so the upload flow can
-    be demonstrated without preparing a file by hand.
+    The app uses it for the "use example data" button, so the user can
+    try the upload flow without preparing a file.
 
     Args:
-        df_project (pd.DataFrame): Project dataset (date, store, item, sales).
+        df_project (pd.DataFrame): Project dataset with the columns
+            `date`, `store`, `item` and `sales`.
         store (int): Store to take.
         items (list): Item ids to take.
-        last_days (int): How many trailing days of history to keep.
+        last_days (int): Number of most recent days of history to keep.
 
     Returns:
-        pd.DataFrame: columns fecha, tienda, producto, cantidad_vendida.
+        pd.DataFrame: Table with the columns `fecha`, `tienda`, `producto`
+        and `cantidad_vendida`.
     """
     subset = df_project[(df_project["store"] == store) & (df_project["item"].isin(items))].copy()
     subset["date"] = pd.to_datetime(subset["date"])

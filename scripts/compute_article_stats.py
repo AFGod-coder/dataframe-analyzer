@@ -1,6 +1,7 @@
-"""
-Computes every number reported in the article's Results section from the
-per-series result files, so each table can be regenerated from the repo.
+"""Calculate all the result numbers of the study from the result files.
+
+With this script, every results table can be created again from the
+files in the repository.
 
 Inputs:
     results/unified_metrics.csv     (4 base models; scripts/run_unified_simulation.py)
@@ -29,6 +30,20 @@ NAIVE = "Ingenuo estacional (t-7)"
 
 
 def naive_metrics(df, pairs):
+    """Evaluate the seasonal naive baseline on the test window.
+
+    The baseline predicts each day with the sales of 7 days before
+    (y_{t-7}).
+
+    Args:
+        df (pd.DataFrame): Raw dataset with the columns `date`, `store`,
+            `item` and `sales`.
+        pairs (list): (store, item) pairs to evaluate.
+
+    Returns:
+        tuple: A DataFrame with MAE, RMSE and MAPE for each series, and a
+        list with the R2 value of each series.
+    """
     rows, r2 = [], []
     for store, item in pairs:
         x = df[(df.store == store) & (df.item == item)].sort_values("date").set_index("date")["sales"].astype(float)
@@ -42,11 +57,25 @@ def naive_metrics(df, pairs):
 
 
 def accuracy(preds, tol, weekly):
+    """Count the predictions that are within a relative tolerance.
+
+    Args:
+        preds (pd.DataFrame): Daily predictions with the columns `store`,
+            `item`, `ds`, `y` and `yhat`.
+        tol (float): Relative tolerance (0.15 means +-15%).
+        weekly (bool): If True, compare weekly totals (blocks of 7
+            consecutive days from the start of the test window). If
+            False, compare daily values.
+
+    Returns:
+        dict: Keys `within` (number of good values), `total` (number of
+        values) and `pct` (percentage of good values).
+    """
     within = total = 0
     for _, g in preds.groupby(["store", "item"]):
         g = g.sort_values("ds")
         y, yh = g.y.values, np.clip(g.yhat.values, 0, None)
-        if weekly:  # consecutive 7-day blocks from the start of the test window
+        if weekly:  # Blocks of 7 consecutive days from the start of the test window.
             n = len(y) // 7
             y, yh = y[: n * 7].reshape(n, 7).sum(1), yh[: n * 7].reshape(n, 7).sum(1)
         within += int((np.abs(y - yh) <= tol * y).sum())
@@ -55,6 +84,7 @@ def accuracy(preds, tol, weekly):
 
 
 def main():
+    """Read the result files, calculate all statistics and save them."""
     df = pd.read_csv("data/raw/train.csv", parse_dates=["date"])
     base = pd.read_csv("results/unified_metrics.csv")
     base = base[base.model.isin(BASE)][["model", "store", "item", "MAE", "RMSE", "MAPE"]]

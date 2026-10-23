@@ -1,45 +1,43 @@
-"""
-Demo web app for section 2.5 (Application Implementation).
+"""Streamlit web app for demand forecasting and purchase planning.
 
-Two tabs, both served by the same mathematical model (the Ensemble of
-section 2.4, through ForecastService):
+The app has two tabs. Both use the same mathematical model (the
+ensemble, through `ForecastService`):
 
-  1. "Dataset del proyecto": explore forecasts for any store-item pair of
-     the Kaggle dataset used in the article (backtest metrics + forecast).
-  2. "Mis ventas: ¿cuánto comprar?": the end-user flow. The user uploads
-     their own sales history (Excel/CSV, fixed template), the app
-     validates and normalizes it, lists the products that have enough
-     history, forecasts the chosen product, and recommends how many
-     units to buy to cover a period up to a chosen date, given the
-     inventory they already have and a service level.
+  1. `Dataset del proyecto`: forecasts for any store and item of the
+     Kaggle dataset, with backtest metrics and a future forecast.
+  2. `Mis ventas: ¿cuánto comprar?`: the flow for the end user. The user
+     uploads a sales history (Excel or CSV, with a fixed template). The
+     app checks and cleans the file, shows the products with enough
+     history, forecasts the chosen product and recommends how many units
+     to buy for a period that ends on a chosen date. The recommendation
+     uses the current inventory and a service level.
 
 Run with:
     streamlit run webapp/app.py
 
-Numbered functionalities (for the rubric's "at least 10 distinguishable
-functionalities" requirement -- keep this list in sync with the code):
-    Tab 1 - Dataset del proyecto
-    1.  Selección de tienda
-    2.  Selección de producto
-    3.  Selección del horizonte de pronóstico (días)
-    4.  Selección de modelo (Ensemble por defecto; registro extensible)
-    5.  Botón para generar el pronóstico
-    6.  Gráfico de histórico + pronóstico (Plotly, interactivo)
-    7.  Tabla de métricas de error del modelo (MAE, RMSE, MAPE)
-    8.  Manejo de errores de entrada (combinación sin datos, fallos del modelo)
-    9.  Exportar el resultado del pronóstico a CSV
-    10. Historial de consultas realizadas en la sesión actual
-    11. Sección de ayuda que interpreta las métricas para un lector no técnico
-    Tab 2 - Mis ventas: ¿cuánto comprar?
-    12. Descarga de la plantilla Excel con la estructura exigida
-    13. Carga del historial de ventas propio (Excel .xlsx o CSV)
-    14. Validación y normalización del archivo con reporte de problemas
-    15. Resumen de productos disponibles y aptos para pronosticar
-    16. Selección de producto y fecha objetivo / periodo a cubrir
-    17. Recomendación de compra (demanda esperada + stock de seguridad - inventario)
-    18. Confiabilidad del modelo sobre los datos del usuario (precisión semanal)
-    19. Exportar la recomendación a Excel
-    20. Datos de ejemplo para probar el flujo sin preparar un archivo
+Numbered features (keep this list the same as the code):
+    Tab 1 - Project dataset
+    1.  Store selection
+    2.  Product selection
+    3.  Forecast horizon selection (days)
+    4.  Model selection (ensemble by default; the registry can grow)
+    5.  Button to create the forecast
+    6.  Interactive chart with history and forecast (Plotly)
+    7.  Table with the model error metrics (MAE, RMSE, MAPE)
+    8.  Handling of input errors (store and item without data, model errors)
+    9.  Export of the forecast to CSV
+    10. History of the queries in the current session
+    11. Help section that explains the metrics for non-technical readers
+    Tab 2 - My sales: how much to buy?
+    12. Download of the Excel template with the required structure
+    13. Upload of the user's sales history (Excel .xlsx or CSV)
+    14. File check and cleaning, with a report of the problems found
+    15. Summary of the products found and of the products that can be forecast
+    16. Selection of the product and the target date / period to cover
+    17. Purchase recommendation (expected demand + safety stock - inventory)
+    18. Reliability of the model on the user's data (weekly accuracy)
+    19. Export of the recommendation to Excel
+    20. Example data to try the flow without preparing a file
 """
 
 import io
@@ -82,23 +80,26 @@ MODEL_OPTIONS = list(MODEL_REGISTRY.keys())
 st.set_page_config(page_title="Demand Forecasting Demo", layout="wide")
 
 
-# ---------------------------------------------------------------- shared
+# ------------------------------------------------------- shared helpers
 
 @st.cache_resource
 def get_service(data_path: str) -> ForecastService:
-    """Load the project dataset once per Streamlit server process.
+    """Load the project dataset only once for each Streamlit server process.
 
     Args:
         data_path (str): Path to the raw dataset.
 
     Returns:
-        ForecastService: the cached service instance.
+        ForecastService: The cached service.
     """
     return ForecastService(data_path)
 
 
 def render_help_section() -> None:
-    """Functionality 11: explain the metrics in plain language."""
+    """Show the help section that explains the metrics in simple words.
+
+    Feature 11.
+    """
     with st.expander("¿Cómo interpretar estos resultados?"):
         st.markdown(
             """
@@ -118,20 +119,31 @@ def render_help_section() -> None:
 
 
 def model_caption(model_name: str) -> str:
-    """Short note on what the selected model is and how long it takes."""
+    """Get a short note about the selected model and its training time.
+
+    Args:
+        model_name (str): Name of the selected model (a key of
+            `MODEL_REGISTRY`).
+
+    Returns:
+        str: Note in Spanish to show under the model selector.
+    """
     if model_name == DEFAULT_MODEL:
         return (
-            "Modelo matemático oficial (sección 2.4): fusiona Prophet, Random Forest, "
+            "Modelo matemático principal: fusiona Prophet, Random Forest, "
             "XGBoost y LSTM con pesos aprendidos. Es el más preciso, pero entrena 4 "
             "modelos: puede tardar 1-3 minutos."
         )
     return "Modelo base individual (insumo del Ensemble). Útil para comparar."
 
 
-# ---------------------------------------------------------- tab 1: project
+# ------------------------------------------------- tab 1: project dataset
 
 def render_project_tab() -> None:
-    """Tab 1: forecasts over the project's Kaggle dataset (functionalities 1-11)."""
+    """Show tab 1: forecasts on the Kaggle dataset of the project.
+
+    Features 1 to 11.
+    """
     st.caption(
         "Pronóstico sobre el dataset del artículo (Kaggle Store Item Demand "
         "Forecasting: 10 tiendas, 50 productos, 2013-2017)."
@@ -146,18 +158,18 @@ def render_project_tab() -> None:
         return
 
     if "query_history" not in st.session_state:
-        st.session_state.query_history = []  # functionality 10
+        st.session_state.query_history = []  # Feature 10
 
     with st.form("project_form"):
         c1, c2, c3, c4 = st.columns([1, 1, 2, 2])
-        store = c1.selectbox("Tienda", service.list_stores())  # functionality 1
-        item = c2.selectbox("Producto", service.list_items())  # functionality 2
-        horizon_days = c3.slider("Horizonte de pronóstico (días)", 7, MAX_HORIZON_DAYS, 30)  # functionality 3
-        model_name = c4.selectbox("Modelo", MODEL_OPTIONS, index=MODEL_OPTIONS.index(DEFAULT_MODEL))  # functionality 4
+        store = c1.selectbox("Tienda", service.list_stores())  # Feature 1
+        item = c2.selectbox("Producto", service.list_items())  # Feature 2
+        horizon_days = c3.slider("Horizonte de pronóstico (días)", 7, MAX_HORIZON_DAYS, 30)  # Feature 3
+        model_name = c4.selectbox("Modelo", MODEL_OPTIONS, index=MODEL_OPTIONS.index(DEFAULT_MODEL))  # Feature 4
         st.caption(model_caption(model_name))
-        run_forecast = st.form_submit_button("Generar pronóstico", type="primary")  # functionality 5
+        run_forecast = st.form_submit_button("Generar pronóstico", type="primary")  # Feature 5
 
-    with st.expander("Historial de esta sesión"):  # functionality 10
+    with st.expander("Historial de esta sesión"):  # Feature 10
         if st.session_state.query_history:
             st.dataframe(pd.DataFrame(st.session_state.query_history), hide_index=True)
         else:
@@ -174,8 +186,8 @@ def render_project_tab() -> None:
                 store=store, item=item, horizon_days=horizon_days, model_name=model_name,
             )
     except ValueError as exc:
-        # functionality 8: input/data error handling, shown to the user
-        # instead of a raw traceback.
+        # Feature 8: show input and data errors to the user as a clear
+        # message, not as a traceback.
         st.error(f"No fue posible generar el pronóstico: {exc}")
         logger.exception("Forecast failed for store=%s, item=%s", store, item)
         return
@@ -186,7 +198,7 @@ def render_project_tab() -> None:
 
     col_chart, col_metrics = st.columns([3, 1])
     with col_chart:
-        # functionality 6: interactive history + forecast chart.
+        # Feature 6: interactive chart with history and forecast.
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=result.history["ds"], y=result.history["y"],
@@ -204,11 +216,11 @@ def render_project_tab() -> None:
 
     with col_metrics:
         st.subheader(f"Desempeño del modelo (últimos {DEFAULT_BACKTEST_DAYS} días)")
-        # functionality 7: error metrics table.
+        # Feature 7: error metrics.
         st.metric("MAE", f"{result.metrics['MAE']:.2f}")
         st.metric("RMSE", f"{result.metrics['RMSE']:.2f}")
         st.metric("MAPE", f"{result.metrics['MAPE']:.1f}%")
-        # functionality 9: export the forecast as CSV.
+        # Feature 9: export the forecast to CSV.
         st.download_button(
             "Descargar pronóstico (CSV)",
             data=result.future_forecast.to_csv(index=False).encode("utf-8"),
@@ -223,13 +235,36 @@ def render_project_tab() -> None:
 
 @st.cache_data(show_spinner=False)
 def cached_process_upload(file_bytes: bytes, filename: str):
-    """Validate + normalize the uploaded file once per distinct file (functionality 14)."""
+    """Check and clean an uploaded file, only once for each different file.
+
+    Feature 14.
+
+    Args:
+        file_bytes (bytes): Content of the uploaded file.
+        filename (str): Original file name (.xlsx or .csv).
+
+    Returns:
+        UploadReport: Clean data, product summary and warnings.
+
+    Raises:
+        SalesFileError: If the file cannot be used.
+    """
     return process_upload(file_bytes, filename)
 
 
 @st.cache_data(show_spinner=False)
 def cached_example_upload(data_path: str):
-    """Functionality 20: build an example upload from the project dataset."""
+    """Create an example upload from the project dataset.
+
+    Feature 20. It takes 3 products of store 1 and the last 2 years.
+
+    Args:
+        data_path (str): Path to the raw project dataset.
+
+    Returns:
+        tuple: The `UploadReport` of the example and the example table in
+        the template format.
+    """
     df_project = pd.read_csv(data_path)
     example = project_dataset_to_template(df_project, store=1, items=[5, 15, 28], last_days=730)
     return normalize_sales(example), example
@@ -237,14 +272,28 @@ def cached_example_upload(data_path: str):
 
 @st.cache_data(show_spinner=False)
 def cached_product_forecast(series: pd.DataFrame, store: str, item: str, model_name: str, backtest_days: int) -> dict:
-    """Train the model on one product and forecast MAX_HORIZON_DAYS ahead.
+    """Train the model on one product and forecast `MAX_HORIZON_DAYS` ahead.
 
-    The horizon is always the maximum allowed, so changing the target
-    date, the inventory or the service level later only recomputes the
-    (instant) purchase recommendation, never the model. For every model
-    in the registry the first k days of a longer forecast are identical
-    to a k-day forecast (Prophet is a curve; the others are recursive),
-    so this costs nothing in accuracy.
+    The horizon is always the maximum. So, when the user changes the
+    target date, the inventory or the service level, the app only
+    calculates the purchase recommendation again (this is fast), and the
+    model is not trained again. For every model in the registry, the
+    first k days of a long forecast are the same as a k-day forecast
+    (Prophet fits a curve and the other models are recursive), so the
+    accuracy does not change.
+
+    Args:
+        series (pd.DataFrame): Clean daily data with the columns `date`,
+            `store`, `item` and `sales`.
+        store (str): Store name.
+        item (str): Product name.
+        model_name (str): Name of the model (a key of `MODEL_REGISTRY`).
+        backtest_days (int): Size of the test window in days.
+
+    Returns:
+        dict: Keys `history` (full series), `backtest` (real and predicted
+        values on the test window), `metrics` (MAE, RMSE, MAPE) and
+        `forecast` (future daily forecast).
     """
     service = ForecastService.from_dataframe(series)
     result = service.get_forecast(
@@ -261,7 +310,21 @@ def cached_product_forecast(series: pd.DataFrame, store: str, item: str, model_n
 
 
 def build_report_excel(rec, label: str, model_name: str, metrics: dict, accuracy: dict) -> bytes:
-    """Functionality 19: Excel report with the recommendation and the daily forecast."""
+    """Create the Excel report with the recommendation and the daily forecast.
+
+    Feature 19.
+
+    Args:
+        rec (PurchaseRecommendation): Purchase recommendation to report.
+        label (str): Product and store name shown in the report.
+        model_name (str): Name of the model used.
+        metrics (dict): Keys `MAE`, `RMSE` and `MAPE` on the test window.
+        accuracy (dict): Result of `weekly_accuracy`.
+
+    Returns:
+        bytes: An .xlsx file with the sheets `recomendacion` and
+        `pronostico_diario`.
+    """
     summary = pd.DataFrame({
         "concepto": [
             "Producto", "Modelo", "Periodo cubierto", "Días del periodo",
@@ -296,7 +359,10 @@ def build_report_excel(rec, label: str, model_name: str, metrics: dict, accuracy
 
 
 def render_file_instructions() -> None:
-    """Step 1: explain the required structure and offer the template (functionality 12)."""
+    """Show step 1: the required file structure and the template download.
+
+    Feature 12.
+    """
     st.markdown("#### 1. Prepara tu archivo")
     st.markdown(
         "Sube tu historial de ventas en Excel (.xlsx) o CSV con estas columnas "
@@ -321,10 +387,17 @@ def render_file_instructions() -> None:
 
 
 def load_user_data():
-    """Step 2: upload or example data. Returns an UploadReport or None."""
+    """Show step 2: upload a file or use the example data.
+
+    Features 13, 14 and 20.
+
+    Returns:
+        UploadReport | None: The processed data, or None when there is no
+        data yet or the file cannot be used.
+    """
     st.markdown("#### 2. Sube tus ventas")
     col_up, col_ex = st.columns([3, 1])
-    uploaded = col_up.file_uploader("Archivo de ventas", type=["xlsx", "csv"])  # functionality 13
+    uploaded = col_up.file_uploader("Archivo de ventas", type=["xlsx", "csv"])  # Feature 13
     with col_ex:
         st.write("")
         if st.button("Usar datos de ejemplo", help="3 productos de la Tienda 1 del dataset del proyecto, últimos 2 años"):
@@ -343,14 +416,20 @@ def load_user_data():
             report, _ = cached_example_upload(DATA_PATH)
             return report
     except SalesFileError as exc:
-        # functionality 14: blocking problems explained to the user.
+        # Feature 14: explain to the user the problems that stop the process.
         st.error(f"No pudimos usar tu archivo: {exc}")
         return None
     return None
 
 
 def render_upload_summary(report) -> None:
-    """Functionality 14-15: validation report and product summary."""
+    """Show the file check report and the product summary.
+
+    Features 14 and 15.
+
+    Args:
+        report (UploadReport): Result of processing the uploaded file.
+    """
     data = report.data
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Filas leídas", f"{report.rows_read:,}")
@@ -371,7 +450,13 @@ def render_upload_summary(report) -> None:
 
 
 def render_recommendation(report) -> None:
-    """Steps 3-5: product, model, planning inputs and the recommendation (functionalities 16-19)."""
+    """Show steps 3 to 5: product, model, planning inputs and recommendation.
+
+    Features 16 to 19.
+
+    Args:
+        report (UploadReport): Result of processing the uploaded file.
+    """
     eligible = report.products[report.products["apto"]]
     labels = {
         f"{row.producto}  —  {row.tienda}": (row.tienda, row.producto)
@@ -380,7 +465,7 @@ def render_recommendation(report) -> None:
 
     st.markdown("#### 3. Elige el producto y genera su pronóstico")
     c1, c2 = st.columns([2, 2])
-    label = c1.selectbox("Producto", list(labels))  # functionality 16
+    label = c1.selectbox("Producto", list(labels))  # Feature 16
     model_name = c2.selectbox(
         "Modelo", MODEL_OPTIONS, index=MODEL_OPTIONS.index(DEFAULT_MODEL), key="upload_model",
     )
@@ -398,7 +483,7 @@ def render_recommendation(report) -> None:
                     "key": key,
                     "result": cached_product_forecast(series, store, item, model_name, backtest_days),
                 }
-        except Exception as exc:  # model failures shown to the user, not as a traceback
+        except Exception as exc:  # Show model errors to the user as a message, not as a traceback.
             logger.exception("Upload forecast failed for %s", label)
             st.error(f"No fue posible entrenar el modelo para este producto: {exc}")
             return
@@ -442,7 +527,7 @@ def render_recommendation(report) -> None:
     accuracy = weekly_accuracy(result["backtest"]["y"].values, result["backtest"]["yhat"].values)
 
     st.markdown("#### 5. Recomendación")
-    c1, c2, c3, c4 = st.columns(4)  # functionality 17
+    c1, c2, c3, c4 = st.columns(4)  # Feature 17
     c1.metric("Unidades a comprar", f"{rec.recommended_units:,}")
     c2.metric(f"Demanda esperada ({rec.days} días)", f"{rec.expected_demand:,.0f}")
     c3.metric("Stock de seguridad", f"{rec.safety_stock:,.0f}")
@@ -466,7 +551,7 @@ def render_recommendation(report) -> None:
                       legend=dict(orientation="h"))
     st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("##### ¿Qué tan confiable es este pronóstico para tu producto?")  # functionality 18
+    st.markdown("##### ¿Qué tan confiable es este pronóstico para tu producto?")  # Feature 18
     c1, c2, c3, c4 = st.columns(4)
     acc = accuracy["accuracy_pct"]
     c1.metric("Precisión semanal (±15%)", "N/D" if acc is None else f"{acc:.1f}%",
@@ -491,7 +576,7 @@ def render_recommendation(report) -> None:
         daily["demanda_acumulada"] = daily["demanda_pronosticada"].cumsum()
         st.dataframe(daily.round(2), hide_index=True, use_container_width=True)
 
-    st.download_button(  # functionality 19
+    st.download_button(  # Feature 19
         "Descargar recomendación (Excel)",
         data=build_report_excel(rec, label, model_name, result["metrics"], accuracy),
         file_name=f"recomendacion_compra_{str(item).replace(' ', '_')}_{rec.period_end:%Y%m%d}.xlsx",
@@ -500,7 +585,10 @@ def render_recommendation(report) -> None:
 
 
 def render_upload_tab() -> None:
-    """Tab 2: the end-user flow (functionalities 12-20)."""
+    """Show tab 2: the flow for the end user.
+
+    Features 12 to 20.
+    """
     st.caption(
         "Sube tu historial de ventas y obtén cuántas unidades comprar de un producto "
         "para cubrir la demanda hasta la fecha que elijas."
@@ -514,7 +602,7 @@ def render_upload_tab() -> None:
 
 
 def main() -> None:
-    """Entry point: renders the full Streamlit page."""
+    """Show the full Streamlit page."""
     st.title("Pronóstico de Demanda y Recomendación de Compra")
     tab_upload, tab_project = st.tabs(["Mis ventas: ¿cuánto comprar?", "Dataset del proyecto"])
     with tab_upload:

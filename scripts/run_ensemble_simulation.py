@@ -1,15 +1,13 @@
-"""
-Run script: backtest the EnsembleForecaster (section 2.4's single fused
-mathematical model) over the same 51-series stratified sample already
-used for Prophet/Random Forest/XGBoost/LSTM in results/unified_metrics.csv,
-with the same TEST_DAYS=90 backtest window, so the comparison table in
-section 2.3 is directly comparable.
+"""Backtest of the ensemble model on the stratified sample of 51 series.
 
-Resumable by design: each series' result is flushed to disk immediately,
-and a second run skips (store, item) pairs already present in the output
-file -- the same pattern used for the LSTM run in Hito 2, needed because
-each series takes ~50-90s (training 2 copies of 4 base models) and a
-single process call may be cut off.
+The script uses the same 51 series and the same 90-day test window as
+the base models in `results/unified_metrics.csv`, so the results can be
+compared directly.
+
+The script can continue after a stop. The result of each series is
+saved to disk at once, and a new run skips the (store, item) pairs that
+are already in the output file. This is useful because each series
+takes about 50-90 seconds (it trains 2 copies of the 4 base models).
 
 Usage:
     python3 scripts/run_ensemble_simulation.py            # all 51 series
@@ -33,8 +31,21 @@ OUTPUT_PATH = "results/ensemble_metrics.csv"
 
 
 def select_representative_sample(df: pd.DataFrame, fraction: float, seed: int) -> list:
-    """Identical to the function used for every other model's simulation
-    (same fraction, same seed) so this evaluates the exact same 51 series."""
+    """Select a stratified sample of (store, item) pairs.
+
+    This is the same selection used for the other models (same fraction
+    and seed), so all models are evaluated on the same 51 series.
+
+    Args:
+        df (pd.DataFrame): Full raw dataset with the columns `date`,
+            `store`, `item` and `sales`.
+        fraction (float): Fraction of the 500 series to keep from each
+            sales group (low, medium and high).
+        seed (int): Random seed for reproducible results.
+
+    Returns:
+        list: Selected (store, item) pairs.
+    """
     totals = df.groupby(["store", "item"])["sales"].sum().reset_index()
     totals["volume_tercile"] = pd.qcut(totals["sales"], 3, labels=["low", "medium", "high"])
     sample = (

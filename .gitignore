@@ -5,24 +5,27 @@ data/processed/
 __pycache__/
 *.pyc
 
-# Empaquetado
+# Packaging
 *.egg-info/
 build/
 dist/
 
-# Entornos virtuales
+# Virtual environments
 venv/
 .venv/
 env/
 
-# Variables de entorno
+# Environment variables
 .env
 
-# Editores / IDE
+# Editors and IDEs
 .vscode/
 .idea/
 
-# Sistema
+# Operating system files
 .DS_Store
 
 .streamlit/
+
+# Files kept on disk but not tracked (old experiments and unrelated data)
+_archive/
