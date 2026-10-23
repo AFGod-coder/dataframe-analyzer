@@ -28,11 +28,14 @@ plain unconstrained linear regression. An earlier version used plain
 `sklearn.linear_model.LinearRegression` on the 4 out-of-sample
 predictions; measured against the same 51-series stratified sample used
 throughout section 2.3, it OVERFIT the small `validation_meta` window --
-with no constraint it could (and did) assign large positive/negative
-coefficients that cancel out (e.g. w_RF=+1.4, w_Prophet=-0.3), which is a
-textbook symptom of overfitting a handful of validation points with 4+1
-free parameters. That version scored WORSE on average (MAE 7.02) than
-Prophet alone (MAE 6.41) across the 51 series -- the fusion was hurting
+with no constraint it assigned coefficients above 1 offset by negative
+ones -- e.g. for store 2 / item 28: w_RF=1.209, w_XGB=0.138,
+w_Prophet=-0.102, w_LSTM=-0.163, intercept=1.173 -- a textbook symptom of
+overfitting a short validation window with 4+1 free parameters. Over the
+51-series sample that version scored WORSE than Prophet alone:
+MAE 7.02 +/- 2.12, RMSE 8.75 +/- 2.57, MAPE 14.79 +/- 4.67 (mean +/- std
+across series), and it was the most accurate of the five models in only
+11 of the 51 series (vs. Prophet 6.41 MAE) -- the fusion was hurting
 accuracy instead of helping it.
 
 Constraining the weights to be non-negative and sum to 1 (a weighted

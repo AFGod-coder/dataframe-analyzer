@@ -356,7 +356,10 @@ def render_upload_summary(report) -> None:
     c1.metric("Filas leídas", f"{report.rows_read:,}")
     c2.metric("Productos", f"{report.products.shape[0]}")
     c3.metric("Aptos para pronosticar", f"{int(report.products['apto'].sum())}")
-    c4.metric("Rango de fechas", f"{data['date'].min():%Y-%m-%d} → {data['date'].max():%Y-%m-%d}")
+    c4.metric(
+        "Rango de fechas", f"{data['date'].min():%Y-%m} → {data['date'].max():%Y-%m}",
+        help=f"{data['date'].min():%Y-%m-%d} a {data['date'].max():%Y-%m-%d}",
+    )
     for message in report.warnings:
         st.warning(message)
     with st.expander("Productos encontrados", expanded=False):
@@ -456,7 +459,7 @@ def render_recommendation(report) -> None:
     fig.add_trace(go.Scatter(x=recent["ds"], y=recent["y"], mode="lines", name="Ventas reales",
                              line=dict(color="#4C78A8")))
     fig.add_trace(go.Scatter(x=result["forecast"]["ds"], y=result["forecast"]["yhat"].clip(lower=0),
-                             mode="lines", name="Pronóstico", line=dict(color="#F58518", dash="dash")))
+                             mode="lines", name="Pronóstico", line=dict(color="#F58518", width=2)))
     fig.add_vrect(x0=rec.period_start, x1=rec.period_end, fillcolor="#F58518", opacity=0.12,
                   line_width=0, annotation_text="Periodo a cubrir", annotation_position="top left")
     fig.update_layout(title=f"{item} — {store}", xaxis_title="Fecha", yaxis_title="Unidades",
