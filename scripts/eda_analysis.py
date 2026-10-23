@@ -1,15 +1,14 @@
-"""
-Exploratory Data Analysis (EDA) for the sales dataset.
+"""Exploratory data analysis (EDA) of the sales dataset.
 
-Covers section 2.1 (Dataset Construction) of the project rubric:
-    1. Confirms the dataset is a balanced panel (same number of rows
-       for every store-item combination).
-    2. Distribution of sales by store.
-    3. Distribution of sales by product.
-    4. Sales trend over time (monthly) to check for seasonality.
+Steps:
+    1. Check that the dataset is a balanced panel (the same number of
+       rows for every store and item).
+    2. Sales distribution by store.
+    3. Sales distribution by product.
+    4. Monthly sales trend, to check the seasonality.
 
-Run after `scripts/run_pipeline.py`, since it reads the cleaned and
-transformed dataset produced by the pipeline.
+Run this script after `scripts/run_pipeline.py`, because it reads the
+clean dataset that the pipeline creates.
 """
 
 import logging
@@ -34,10 +33,9 @@ FIGURES_DIR = "reports/figures/eda"
 def check_balanced_dataset(df: pd.DataFrame) -> None:
     """Confirm every store-item combination has the same number of rows.
 
-    A "balanced panel" here means the dataset has a full daily history
-    for every store-item combination, with no missing days. This is
-    verified by counting rows per (store, item) group and checking that
-    only one distinct row count exists across all groups.
+    A "balanced panel" means that every store and item has a full daily
+    history, without missing days. The function counts the rows of each
+    (store, item) group and checks that all groups have the same count.
 
     Args:
         df (pd.DataFrame): The cleaned dataset, with 'store' and 'item'

@@ -1,7 +1,7 @@
-"""
-Adapters that make RandomForestForecaster, XGBoostForecaster and
-LSTMForecaster expose the same interface ForecastService already uses
-for ProphetForecaster:
+"""Adapters that give Random Forest, XGBoost and LSTM the Prophet interface.
+
+`ForecastService` uses the same methods for every model, as in
+`ProphetForecaster`:
 
     prepare_series(df, store, item) -> DataFrame[ds, y]
     split_train_test(series, test_days) -> (train, test, cutoff)   # ds/y slices
@@ -9,24 +9,21 @@ for ProphetForecaster:
     predict(dates_df)  -> DataFrame[ds, yhat]                       # dates_df has a 'ds' column
     compute_metrics(y_true, y_pred) -> dict
 
-Why an adapter instead of changing the model classes themselves:
-Prophet is curve-based, so it can predict ANY future date directly.
-Random Forest, XGBoost and LSTM instead depend on lag/window features
-computed from real past sales, which do not exist beyond the training
-data. Both calls ForecastService makes to `predict()` -- the backtest
-window and the future horizon -- ask for dates that are contiguous and
-immediately follow whatever the model was just fit on. That means both
-cases reduce to the same operation: forecast `len(dates_df)` days
-ahead, recursively, using the model's own previous predictions as the
-lag inputs once real history runs out. Each adapter below implements
-exactly that, reusing the already-reviewed model classes without
-modifying them.
+Why we use adapters and do not change the model classes:
+Prophet fits a curve, so it can predict any future date directly.
+Random Forest, XGBoost and LSTM use lag or window features made from
+real past sales, and these values do not exist after the training data.
+`ForecastService` calls `predict()` for the backtest window and for the
+future horizon. In both cases the dates are consecutive and start just
+after the training data. So both cases are the same task: forecast
+`len(dates_df)` days ahead in a recursive way, and use the model's own
+predictions as lag values when the real history ends. Each adapter does
+this and uses the model classes without changing them.
 
-Random Forest and XGBoost share the exact same feature engineering
-(calendar features + lag_1/7/14/30 + rolling_mean_7, via build_features()
-on their respective model classes), so the recursive-forecast logic is
-factored into `_TreeModelAdapter` and both adapters just plug in their
-own inner model class.
+Random Forest and XGBoost use the same features (calendar features,
+lag_1, lag_7, lag_14, lag_30 and rolling_mean_7, made by
+`build_features()`). For this reason the recursive logic is in
+`_TreeModelAdapter`, and each adapter only sets its own model class.
 """
 
 import logging
@@ -43,14 +40,15 @@ logger = logging.getLogger(__name__)
 
 
 def _date_split(series: pd.DataFrame, test_days: int):
-    """Plain chronological split on a ds/y series (same rule Prophet uses).
+    """Split a series by date, with the same rule that Prophet uses.
 
     Args:
-        series (pd.DataFrame): Columns ds, y.
-        test_days (int): Number of trailing days reserved for testing.
+        series (pd.DataFrame): Columns `ds` and `y`.
+        test_days (int): Number of last days kept for the test.
 
     Returns:
-        tuple: (train, test, cutoff)
+        tuple: `(train, test, cutoff)`, where `cutoff` is the last date of
+        the training part.
     """
     cutoff = series["ds"].max() - pd.Timedelta(days=test_days)
     train = series[series["ds"] <= cutoff].reset_index(drop=True)
@@ -59,53 +57,76 @@ def _date_split(series: pd.DataFrame, test_days: int):
 
 
 class _TreeModelAdapter:
-    """Shared recursive-forecast logic for lag/calendar-feature tree models.
+    """Recursive forecast logic for tree models with lag and calendar features.
 
-    Subclasses only need to set `_inner_cls` to the model class to wrap
-    (RandomForestForecaster or XGBoostForecaster) -- both expose the
-    same `prepare_series`, `build_features`, `fit`, `model` and
-    `feature_columns` surface, so every other method here works for
-    either one unchanged.
+    A subclass only sets `_inner_cls` to the model class to use
+    (`RandomForestForecaster` or `XGBoostForecaster`). Both classes have
+    the same `prepare_series`, `build_features`, `fit`, `model` and
+    `feature_columns`, so the other methods work for both.
     """
 
-    _inner_cls = None  # set by subclass
+    _inner_cls = None  # The subclass sets the model class.
 
     def __init__(self) -> None:
+        """Create the inner model. No data is stored yet."""
         self._inner = self._inner_cls()
-        self._history = None  # ds/y DataFrame the model was last fit on
+        self._history = None  # Last ds/y data used to fit the model.
 
     def prepare_series(self, df: pd.DataFrame, store: int, item: int) -> pd.DataFrame:
+        """Get the daily sales series of one store and item.
+
+        Args:
+            df (pd.DataFrame): Clean dataset with the columns `date`,
+                `store`, `item` and `sales`.
+            store (int): Store id.
+            item (int): Item id.
+
+        Returns:
+            pd.DataFrame: Series with the columns `ds` and `y`.
+        """
         serie = self._inner.prepare_series(df, store=store, item=item)
         return serie.rename(columns={"date": "ds", "sales": "y"})
 
     def split_train_test(self, series: pd.DataFrame, test_days: int):
+        """Split the series into a training part and a test part by date.
+
+        Args:
+            series (pd.DataFrame): Columns `ds` and `y`.
+            test_days (int): Number of last days kept for the test.
+
+        Returns:
+            tuple: `(train, test, cutoff)`.
+        """
         return _date_split(series, test_days)
 
     def fit(self, train: pd.DataFrame) -> None:
-        """Fit on a ds/y slice (either the backtest train split or the full series).
+        """Train the model with a ds/y series.
+
+        The series can be the training part of the backtest or the full
+        series.
 
         Args:
-            train (pd.DataFrame): Columns ds, y, sorted chronologically.
+            train (pd.DataFrame): Columns `ds` and `y`, in date order.
         """
         self._history = train.rename(columns={"ds": "date", "y": "sales"})
         features = self._inner.build_features(self._history)
         self._inner.fit(features)
 
     def predict(self, dates: pd.DataFrame) -> pd.DataFrame:
-        """Recursive multi-step forecast for `len(dates)` days after fit().
+        """Forecast `len(dates)` days after the training data, one day at a time.
 
-        Builds one row of features at a time (calendar features from the
-        requested date, lag/rolling features from real history plus the
-        predictions made so far) and feeds it to the trained model, one
-        day at a time -- the same recursive idea used by LSTMForecaster
-        .predict_recursive(), applied here because neither tree model
-        ships one.
+        For each day, the method builds one row of features: calendar
+        features from the date, and lag and rolling features from the
+        real history plus the predictions made before. The trained model
+        predicts that day, and the prediction is used as a lag for the
+        next day. This is the same idea as
+        `LSTMForecaster.predict_recursive()`.
 
         Args:
-            dates (pd.DataFrame): Column ds with the dates to forecast.
+            dates (pd.DataFrame): Column `ds` with the dates to forecast.
 
         Returns:
-            pd.DataFrame: Columns ds, yhat.
+            pd.DataFrame: Columns `ds` and `yhat`.
         """
         max_lag = 30
         history_sales = list(self._history["sales"].tail(max_lag + 7).values)
@@ -127,50 +148,80 @@ class _TreeModelAdapter:
             x = pd.DataFrame([row])[self._inner.feature_columns]
             yhat = float(self._inner.model.predict(x)[0])
             preds.append(yhat)
-            history_sales.append(yhat)  # feed the prediction back in as the next lag
+            history_sales.append(yhat)  # The prediction becomes the next lag.
 
         return pd.DataFrame({"ds": dates["ds"].values, "yhat": preds})
 
     def compute_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+        """Calculate the error metrics of a forecast.
+
+        Args:
+            y_true (np.ndarray): Real values.
+            y_pred (np.ndarray): Predicted values.
+
+        Returns:
+            dict: Keys `MAE`, `RMSE` and `MAPE`.
+        """
         return self._inner_cls.compute_metrics(y_true, y_pred)
 
 
 class RandomForestAdapter(_TreeModelAdapter):
-    """Adapts RandomForestForecaster to ForecastService's uniform interface."""
+    """Give `RandomForestForecaster` the common interface of the service."""
 
     _inner_cls = RandomForestForecaster
 
 
 class XGBoostAdapter(_TreeModelAdapter):
-    """Adapts XGBoostForecaster to ForecastService's uniform interface."""
+    """Give `XGBoostForecaster` the common interface of the service."""
 
     _inner_cls = XGBoostForecaster
 
 
 class LSTMAdapter:
-    """Adapts LSTMForecaster to ForecastService's uniform interface."""
+    """Give `LSTMForecaster` the common interface of the service."""
 
     def __init__(self) -> None:
+        """Create the inner LSTM model. No data is stored yet."""
         self._inner = LSTMForecaster()
-        self._history = None  # ds/y DataFrame the model was last fit on
+        self._history = None  # Last ds/y data used to fit the model.
 
     def prepare_series(self, df: pd.DataFrame, store: int, item: int) -> pd.DataFrame:
+        """Get the daily sales series of one store and item.
+
+        Args:
+            df (pd.DataFrame): Clean dataset with the columns `date`,
+                `store`, `item` and `sales`.
+            store (int): Store id.
+            item (int): Item id.
+
+        Returns:
+            pd.DataFrame: Series with the columns `ds` and `y`.
+        """
         serie = self._inner.prepare_series(df, store=store, item=item)
         return serie.rename(columns={"date": "ds", "sales": "y"})
 
     def split_train_test(self, series: pd.DataFrame, test_days: int):
+        """Split the series into a training part and a test part by date.
+
+        Args:
+            series (pd.DataFrame): Columns `ds` and `y`.
+            test_days (int): Number of last days kept for the test.
+
+        Returns:
+            tuple: `(train, test, cutoff)`.
+        """
         return _date_split(series, test_days)
 
     def fit(self, train: pd.DataFrame) -> None:
-        """Fit on a ds/y slice (either the backtest train split or the full series).
+        """Train the LSTM with a ds/y series.
 
-        Scales using ONLY this slice (no future leakage), builds sliding
-        windows and trains on all of them -- there is no internal held-out
-        test set here, since ForecastService already handles the train/test
-        split at a higher level.
+        The scaler uses only this series, so no future data is used. The
+        method builds sliding windows and trains with all of them. There
+        is no test part here, because `ForecastService` already splits
+        the data into training and test parts.
 
         Args:
-            train (pd.DataFrame): Columns ds, y, sorted chronologically.
+            train (pd.DataFrame): Columns `ds` and `y`, in date order.
         """
         self._history = train.rename(columns={"ds": "date", "y": "sales"})
         values = self._history["sales"].values.reshape(-1, 1)
@@ -180,18 +231,19 @@ class LSTMAdapter:
         self._inner.fit(X, y)
 
     def predict(self, dates: pd.DataFrame) -> pd.DataFrame:
-        """Recursive multi-step forecast for `len(dates)` days after fit().
+        """Forecast `len(dates)` days after the training data, one day at a time.
 
-        Reuses LSTMForecaster.predict_recursive() as-is: builds an array
-        made of the last `window` real (scaled) sales values followed by
-        `horizon` placeholder values, so that method's own
-        `history = scaled_values[:-test_days]` slicing lines up correctly.
+        The method uses `LSTMForecaster.predict_recursive()` without
+        changes. It builds an array with the last `window` real scaled
+        sales values and then `horizon` empty values (zeros). In this way
+        the line `history = scaled_values[:-test_days]` inside that method
+        takes exactly the real values.
 
         Args:
-            dates (pd.DataFrame): Column ds with the dates to forecast.
+            dates (pd.DataFrame): Column `ds` with the dates to forecast.
 
         Returns:
-            pd.DataFrame: Columns ds, yhat.
+            pd.DataFrame: Columns `ds` and `yhat`.
         """
         horizon = len(dates)
         window = self._inner.window
@@ -205,4 +257,13 @@ class LSTMAdapter:
 
     @staticmethod
     def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+        """Calculate the error metrics of a forecast.
+
+        Args:
+            y_true (np.ndarray): Real values.
+            y_pred (np.ndarray): Predicted values.
+
+        Returns:
+            dict: Keys `MAE`, `RMSE` and `MAPE`.
+        """
         return LSTMForecaster.compute_metrics(y_true, y_pred)

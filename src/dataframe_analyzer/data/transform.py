@@ -120,22 +120,21 @@ class DataTransform:
     def add_holiday_flag(df: pd.DataFrame, column_date_name: str, country: str) -> pd.DataFrame:
         """Add a boolean column marking public holidays for a given country.
 
-        Not called by default in run_pipeline.py: the source dataset
-        (Kaggle's "Store Item Demand Forecasting Challenge") does not
-        state which country or region its 10 stores belong to, and its
-        official description/discussion pages don't mention one either.
-        Picking a calendar (e.g. US or Colombia) without that information
-        would be an unverifiable assumption presented as fact, so this
-        method is kept available but opt-in: call it explicitly, with the
-        correct country code, only if/when the actual store location is
-        confirmed (e.g. by the professor).
+        `run_pipeline.py` does not call this method by default. The
+        source dataset (Kaggle "Store Item Demand Forecasting Challenge")
+        does not say in which country its 10 stores are. If we chose a
+        calendar (for example US or Colombia) without this information,
+        the result could be wrong. For this reason the method is
+        optional: call it only when the real location of the stores is
+        known, with the correct country code.
 
         Args:
             df (pd.DataFrame): The DataFrame to modify.
             column_date_name (str): Name of the datetime column.
             country (str): ISO country code accepted by the `holidays`
-                package (e.g. "CO" for Colombia, "US" for the United States).
-                Required: there is no default, precisely to avoid guessing.
+                package (for example "CO" for Colombia or "US" for the
+                United States). There is no default value, so the caller
+                must choose the country.
 
         Returns:
             pd.DataFrame: The DataFrame with the new 'is_holiday' column.

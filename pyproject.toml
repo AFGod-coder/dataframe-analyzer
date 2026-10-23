@@ -12,6 +12,7 @@ dependencies = [
     "prophet",
     "plotly",
     "streamlit",
+    "openpyxl",
     "xgboost",
     "tensorflow",
     "numpy",

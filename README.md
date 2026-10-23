@@ -13,33 +13,48 @@ Analiza el historial de ventas de un comerciante para construir un modelo que pr
 ├── src/
 │   └── dataframe_analyzer/     # Paquete principal (código fuente)
 │       ├── pipeline.py          # Orquestador del flujo completo
-│       ├── data/                # Carga, limpieza y transformación
+│       ├── data/                # Carga, limpieza, transformación y carga de archivos del usuario
 │       │   ├── loader.py         # DataLoader
 │       │   ├── cleaner.py        # DataCleaner
-│       │   └── transform.py      # DataTransform, DatePart (día/mes/año, día de la semana, fin de semana; festivo disponible pero opt-in)
-│       ├── models/               # Modelos de forecasting
-│       │   └── prophet_model.py  # ProphetForecaster (split cronológico, entrenamiento, métricas)
+│       │   ├── transform.py      # DataTransform, DatePart (día/mes/año, día de la semana, fin de semana; festivo opcional)
+│       │   └── sales_upload.py   # Validación y normalización del Excel/CSV de ventas del usuario
+│       ├── models/               # Modelos de pronóstico
+│       │   ├── prophet_model.py
+│       │   ├── random_forest_model.py
+│       │   ├── xgboost_model.py
+│       │   ├── lstm_model.py
+│       │   └── ensemble_model.py # Ensemble (Fusionado): combinación convexa de los 4 modelos base
+│       ├── service/              # Capa entre la app y los modelos
+│       │   ├── forecast_service.py # ForecastService y MODEL_REGISTRY
+│       │   ├── adapters.py       # Interfaz común para Random Forest, XGBoost y LSTM
+│       │   └── inventory.py      # Recomendación de compra (stock de seguridad)
 │       ├── visualization/       # Gráficas y utilidades de EDA
 │       │   ├── chart_strategy.py
 │       │   └── eda_utils.py      # EdaPlotter: histograma, boxplot, barras y línea, con guardado a PNG
 │       └── reporting/           # Generación de reportes
 │           └── report_generator.py
 ├── scripts/                    # Puntos de entrada ejecutables
-│   ├── run_pipeline.py          # Corre el pipeline principal (antes main.py)
-│   ├── eda_analysis.py          # EDA completo: balance del dataset + 4 gráficos (2.1)
-│   ├── run_prophet_simulation.py # Simulación con Prophet para una combinación tienda-producto
-│   └── explore_customer_data.py # EDA sobre customer_shopping_data.csv
+│   ├── run_pipeline.py          # Pipeline principal (carga, limpieza, transformación)
+│   ├── eda_analysis.py          # EDA: balance del dataset + 4 gráficos
+│   ├── run_unified_simulation.py  # Backtest de los 4 modelos base en las 51 series
+│   ├── run_ensemble_simulation.py # Backtest del Ensemble en las mismas 51 series
+│   ├── run_ensemble_predictions.py # Predicciones diarias del Ensemble (precisión semanal)
+│   ├── compute_article_stats.py # Tablas y estadísticas de resultados
+│   └── make_article_figures.py  # Figuras del artículo (es/en)
 ├── webapp/
-│   └── app.py                   # Demo web (Streamlit) — sección 2.5 Application Implementation
+│   └── app.py                   # Aplicación web (Streamlit)
 ├── data/
-│   ├── raw/                     # Datasets de entrada (train.csv, customer_shopping_data.csv)
+│   ├── raw/                     # Dataset de entrada (train.csv)
 │   └── processed/               # Salidas generadas (no se versiona)
+├── results/                    # Métricas por serie y estadísticas de resultados
 ├── reports/
-│   └── figures/eda/             # Gráficos PNG generados por eda_analysis.py (para el artículo)
-├── tests/                      # Pruebas (pendiente)
+│   └── figures/                 # Gráficos PNG (eda/, articulo/es, articulo/en)
+├── tests/                      # Pruebas unitarias (pytest)
 ├── pyproject.toml              # Configuración del paquete instalable
 └── requirements.txt             # Dependencias del proyecto
 ```
+
+La carpeta `_archive/` (no versionada, ver `.gitignore`) guarda localmente experimentos antiguos y datos que no forman parte del proyecto final.
 
 ## Requisitos
 
@@ -89,29 +104,59 @@ Esto verifica que el dataset esté balanceado (mismas filas por cada combinació
 
 Las gráficas se generan con la clase `EdaPlotter` (`src/dataframe_analyzer/visualization/eda_utils.py`), que centraliza histogramas, boxplots, barras y líneas con un estilo consistente y guardado opcional a PNG (`save_path`).
 
-### Simulación con Prophet
+### Simulaciones y reproducibilidad de resultados
+
+Todas las cifras de resultados se pueden regenerar desde el repositorio (muestra estratificada de 51 series, semilla 42, ventana de prueba de 90 días):
 
 ```bash
-python scripts/run_prophet_simulation.py
+python scripts/run_unified_simulation.py    # 4 modelos base  -> results/unified_metrics.csv
+python scripts/run_ensemble_simulation.py   # Ensemble        -> results/ensemble_metrics.csv
+python scripts/run_ensemble_predictions.py  # predicciones    -> results/ensemble_predictions.csv
+python scripts/compute_article_stats.py     # tablas          -> results/article_stats.json
+python scripts/make_article_figures.py es   # figuras         -> reports/figures/articulo/es
 ```
 
-Entrena un modelo Prophet para una combinación tienda-producto (configurable en el script), con split cronológico train/test y métricas MAE, RMSE y MAPE.
+Las simulaciones se pueden interrumpir y continuar: cada serie se guarda al terminar y las ya calculadas se omiten.
 
-Para explorar el dataset de `customer_shopping_data.csv`:
-
-```bash
-python scripts/explore_customer_data.py
-```
-
-### Demo web (sección 2.5 - Application Implementation)
+### Aplicación web
 
 ```bash
 streamlit run webapp/app.py
 ```
 
-Abre una página local donde eliges tienda, producto y horizonte de pronóstico, y ves el resultado gráfico junto con las métricas de error (MAE, RMSE, MAPE). Por ahora usa `ProphetForecaster` (el único modelo listo); cuando la sección 2.3 defina cuál de los 4 modelos comparados gana, basta con registrarlo en `MODEL_REGISTRY` (`src/dataframe_analyzer/service/forecast_service.py`) para que aparezca en el selector de la app, sin tocar el resto del código.
+La app tiene dos pestañas y usa por defecto el modelo matemático principal, **Ensemble (Fusionado)**, que combina Prophet, Random Forest, XGBoost y LSTM con pesos aprendidos. Los 4 modelos base siguen disponibles en el selector para comparar (`MODEL_REGISTRY` en `src/dataframe_analyzer/service/forecast_service.py`).
 
-La app lee `data/raw/train.csv` directamente (no el CSV ya procesado por el pipeline), porque Prophet necesita la columna `date` original y el pipeline la descompone/elimina.
+**1. Mis ventas: ¿cuánto comprar?** — flujo para un usuario final:
+
+1. Descarga la plantilla Excel desde la app (o usa el botón *Usar datos de ejemplo*).
+2. Sube tu historial de ventas (`.xlsx` o `.csv`) con esta estructura:
+
+   | columna | obligatoria | ejemplo |
+   |---|---|---|
+   | `fecha` | Sí | `2025-01-02` (también `02/01/2025` o celda de fecha de Excel) |
+   | `tienda` | No | `Centro` (si falta, todo se toma como una sola tienda) |
+   | `producto` | Sí | `Arroz 1kg` |
+   | `cantidad_vendida` | Sí | `14` |
+
+   Se aceptan sinónimos de columnas (`date`, `sku`, `ventas`, `unidades`, `sucursal`...). Puede haber una fila por día o una por venta (las del mismo día se suman); los días sin registros se toman como 0 ventas. Cada producto necesita al menos 120 días de historia (ideal: 2 años).
+3. La app valida el archivo, reporta los problemas que encuentre y lista los productos aptos.
+4. Elige el producto y genera su pronóstico (con el Ensemble tarda 1-3 minutos).
+5. Elige la fecha objetivo, desde cuándo quieres cubrir, tu inventario actual y el nivel de servicio. La app recomienda cuántas unidades comprar:
+
+   `unidades = ⌈ demanda esperada del periodo + z · RMSE · √días − inventario actual ⌉` (nunca negativo)
+
+   donde `RMSE` es el error diario del modelo medido sobre tus propios datos y `z` depende del nivel de servicio (90 % → 1.28, 95 % → 1.645, 99 % → 2.33). También muestra la precisión semanal del modelo en tu producto y permite descargar la recomendación en Excel.
+
+La lógica está en `src/dataframe_analyzer/data/sales_upload.py` (validación y normalización del archivo) y `src/dataframe_analyzer/service/inventory.py` (recomendación de compra).
+
+**2. Dataset del proyecto** — pronósticos sobre cualquier tienda-producto del dataset de Kaggle del artículo, con métricas MAE/RMSE/MAPE y exportación a CSV. Lee `data/raw/train.csv` directamente (no el CSV procesado por el pipeline), porque los modelos necesitan la columna `date` original.
+
+### Pruebas
+
+```bash
+pip install pytest
+PYTHONPATH=src pytest tests -q
+```
 
 ## Estado del proyecto
 
