@@ -1,6 +1,4 @@
-"""
-Entry point: runs the full pipeline (load, clean, transform, save).
-"""
+"""Run the full data pipeline: load, clean, transform and save."""
 
 import logging
 import os
@@ -38,11 +36,11 @@ if __name__ == "__main__":
     logger.info("Extracting weekday and weekend features...")
     df_clean = DataTransform.add_weekday_column(df_clean, 'date')
     df_clean = DataTransform.add_weekend_flag(df_clean, 'date')
-    # NOTE: is_holiday is intentionally NOT generated here. The source
-    # dataset does not specify which country/region the 10 stores belong
-    # to, so any holiday calendar would be an unverifiable assumption.
-    # DataTransform.add_holiday_flag(df, 'date', country=...) is available
-    # to call explicitly if the real store location is ever confirmed.
+    # NOTE: is_holiday is not created here on purpose. The source dataset
+    # does not say in which country the 10 stores are, so a holiday
+    # calendar could be wrong. Call
+    # DataTransform.add_holiday_flag(df, 'date', country=...) only when
+    # the real location of the stores is known.
 
     df_clean = df_clean.drop(columns=['date'])
 

@@ -1,11 +1,12 @@
-"""
-Save per-day backtest predictions (not just aggregate MAE/RMSE/MAPE) for
-the Ensemble (Fusionado) model over the same 51-series stratified sample,
-so section 2.5's weekly-accuracy metric (">95%") can be recomputed using
-the Ensemble -- the model the app now uses by default -- instead of the
-Prophet-only figure computed in an earlier hito.
+"""Save the daily backtest predictions of the ensemble model.
 
-Resumable: skips (store, item) pairs already present in the output file.
+The script saves the prediction of each day (not only MAE, RMSE and
+MAPE) on the same stratified sample of 51 series. With these values we
+can calculate the weekly accuracy of the ensemble, which is the default
+model of the app.
+
+The script can continue after a stop: it skips the (store, item) pairs
+that are already in the output file.
 
 Usage:
     python3 scripts/run_ensemble_predictions.py
@@ -24,6 +25,21 @@ OUTPUT_PATH = "results/ensemble_predictions.csv"
 
 
 def select_representative_sample(df, fraction, seed):
+    """Select a stratified sample of (store, item) pairs.
+
+    This is the same selection used for the other models (same fraction
+    and seed), so all models are evaluated on the same 51 series.
+
+    Args:
+        df (pd.DataFrame): Full raw dataset with the columns `date`,
+            `store`, `item` and `sales`.
+        fraction (float): Fraction of the 500 series to keep from each
+            sales group (low, medium and high).
+        seed (int): Random seed for reproducible results.
+
+    Returns:
+        list: Selected (store, item) pairs.
+    """
     totals = df.groupby(["store", "item"])["sales"].sum().reset_index()
     totals["volume_tercile"] = pd.qcut(totals["sales"], 3, labels=["low", "medium", "high"])
     sample = (

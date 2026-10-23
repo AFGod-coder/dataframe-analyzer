@@ -1,9 +1,10 @@
-"""
-Publication figures of the article (Figs. 1-7), in Spanish ('es', decimal comma)
-or English ('en'). Reads the per-series results produced by
-scripts/compute_article_stats.py and results/ref_series_2_28.csv (test-window
-predictions of the 5 models for store 2 / item 28, an out-of-sample reference
-series: the highest-volume series of the 500).
+"""Create the figures of the study (Figures 1-7) in Spanish or English.
+
+Use 'es' for Spanish (with decimal comma) or 'en' for English. The script
+reads the results made by `scripts/compute_article_stats.py` and the
+file `results/ref_series_2_28.csv`. This file has the test window
+predictions of the 5 models for store 2 and item 28, the series with
+the highest sales of the 500.
 
 Usage:
     python3 scripts/make_article_figures.py es
@@ -70,6 +71,11 @@ T = {
 
 
 def main(lang):
+    """Create and save all the figures in one language.
+
+    Args:
+        lang (str): Language of the labels, "es" or "en".
+    """
     t = T[lang]
     from matplotlib.ticker import FuncFormatter
     dec = (lambda v, nd=1: f"{v:.{nd}f}".replace(".", ",")) if lang == "es" else (lambda v, nd=1: f"{v:.{nd}f}")
@@ -77,6 +83,15 @@ def main(lang):
         plt.rcParams["axes.formatter.use_locale"] = False
         _orig_savefig = matplotlib.figure.Figure.savefig
         def _savefig(self, *a, **k):
+            """Use decimal commas on the numeric axes, then save the figure.
+
+            Args:
+                a: Positional arguments for `Figure.savefig`.
+                k: Keyword arguments for `Figure.savefig`.
+
+            Returns:
+                Any: The value returned by `Figure.savefig`.
+            """
             for ax_ in self.axes:
                 for axis in (ax_.yaxis, ax_.xaxis):
                     fmt = axis.get_major_formatter()
@@ -89,7 +104,7 @@ def main(lang):
     os.makedirs(out, exist_ok=True)
     df = pd.read_csv(f"{REPO}/data/raw/train.csv", parse_dates=["date"])
 
-    # Fig 1: store and item totals
+    # Figure 1: total sales by store and by item.
     fig, ax = plt.subplots(1, 2, figsize=(7.2, 2.7), gridspec_kw={"width_ratios": [1, 1.6]})
     st = df.groupby("store").sales.sum() / 1e6
     ax[0].bar(st.index.astype(str), st.values, color=BLUE, width=0.7)
@@ -102,7 +117,7 @@ def main(lang):
     ax[1].grid(axis="x", visible=False)
     fig.tight_layout(); fig.savefig(f"{out}/fig1_tiendas_productos.png"); plt.close(fig)
 
-    # Fig 2: monthly trend + weekday
+    # Figure 2: monthly trend and mean by day of the week.
     fig, ax = plt.subplots(1, 2, figsize=(7.2, 2.6), gridspec_kw={"width_ratios": [1.7, 1]})
     mo = df.set_index("date").sales.resample("MS").sum() / 1e3
     ax[0].plot(mo.index, mo.values, color=BLUE, lw=1.4, marker="o", ms=2.2)
@@ -115,7 +130,7 @@ def main(lang):
     ax[1].set(ylabel=t["avg_day"], title=t["a_week"], ylim=(0, 70))
     fig.tight_layout(); fig.savefig(f"{out}/fig2_tendencia_semana.png"); plt.close(fig)
 
-    # Fig 3: walk-forward scheme
+    # Figure 3: walk-forward training scheme.
     fig, ax = plt.subplots(figsize=(7.2, 2.5))
     ax.set_xlim(0, 100); ax.set_ylim(0, 40); ax.axis("off")
     segs = [(2, 60, BLUE, t["train_base"]), (62, 18, ORANGE, t["val"]), (80, 18, GREEN, t["test"])]
@@ -129,7 +144,7 @@ def main(lang):
         ax.text(2, y, txt, fontsize=7.6, va="center")
     fig.savefig(f"{out}/fig3_esquema_walk_forward.png"); plt.close(fig)
 
-    # Fig 4: MAE distribution boxplot
+    # Figure 4: box plot of the MAE distribution.
     allm = pd.read_csv(f"{ART}/all_models_per_series.csv")
     order = ["Ensemble (Fusionado)", "Prophet", "Random Forest", "XGBoost", "LSTM", "Ingenuo estacional (t-7)"]
     labels = [t["ens"], "Prophet", "Random\nForest", "XGBoost", "LSTM", t["naive"]]
@@ -147,7 +162,7 @@ def main(lang):
     ax.grid(axis="x", visible=False)
     fig.tight_layout(); fig.savefig(f"{out}/fig4_distribucion_mae.png"); plt.close(fig)
 
-    # Fig 5: ensemble fit and residuals on reference series
+    # Figure 5: ensemble fit and residuals on the reference series.
     ref = pd.read_csv(f"{ART}/ref_series_2_28.csv", parse_dates=["ds"])
     fig, ax = plt.subplots(1, 2, figsize=(7.2, 2.6), gridspec_kw={"width_ratios": [1.6, 1]})
     ax[0].plot(ref.ds, ref.y, color=BLUE, lw=1.1, label=t["real"])
@@ -164,7 +179,7 @@ def main(lang):
         a.tick_params(axis="x", rotation=30)
     fig.tight_layout(); fig.savefig(f"{out}/fig5_ensemble_ajuste.png"); plt.close(fig)
 
-    # Fig 6: base models fit (2x2)
+    # Figure 6: fit of the base models (2x2 grid).
     fig, axs = plt.subplots(2, 2, figsize=(7.2, 4.4), sharex=True, sharey=True)
     for a, (name, letter) in zip(axs.flat, [("Prophet", "a"), ("Random Forest", "b"), ("XGBoost", "c"), ("LSTM", "d")]):
         mae = (ref.y - ref[name]).abs().mean()
@@ -181,7 +196,7 @@ def main(lang):
         a.set_xlabel(t["date"])
     fig.tight_layout(); fig.savefig(f"{out}/fig6_modelos_base.png"); plt.close(fig)
 
-    # Fig 7: learned weights
+    # Figure 7: learned weights.
     ens = pd.read_csv(f"{REPO}/results/ensemble_metrics.csv")
     cols = [("w_prophet", "Prophet"), ("w_xgb", "XGBoost"), ("w_rf", "Random Forest"), ("w_lstm", "LSTM")]
     fig, ax = plt.subplots(figsize=(7.2, 2.6))

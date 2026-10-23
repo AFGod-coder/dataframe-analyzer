@@ -1,4 +1,4 @@
-"""Tests for the purchase recommendation (dataframe_analyzer.service.inventory)."""
+"""Tests for the purchase recommendation in `dataframe_analyzer.service.inventory`."""
 
 import math
 
@@ -14,10 +14,20 @@ from dataframe_analyzer.service.inventory import (
 
 
 def _forecast(values, start="2026-01-01"):
+    """Create a daily forecast table from a list of values.
+
+    Args:
+        values (list): Forecast value for each day.
+        start (str): First date of the forecast.
+
+    Returns:
+        pd.DataFrame: Columns `ds` and `yhat`.
+    """
     return pd.DataFrame({"ds": pd.date_range(start, periods=len(values)), "yhat": values})
 
 
 def test_recommendation_formula():
+    """The result follows the formula Q = ceil(D + z * sigma * sqrt(n) - I)."""
     fc = _forecast([10.0] * 30)
     rec = recommend_purchase(fc, "2026-01-01", "2026-01-07", daily_error=4.0,
                              current_inventory=20, service_level=0.95)
@@ -30,18 +40,21 @@ def test_recommendation_formula():
 
 
 def test_never_recommends_negative_purchase():
+    """With a large inventory, the recommendation is 0 units and never negative."""
     rec = recommend_purchase(_forecast([5.0] * 10), "2026-01-01", "2026-01-03",
                              daily_error=1.0, current_inventory=1000)
     assert rec.recommended_units == 0
 
 
 def test_negative_forecasts_are_clipped():
+    """Negative forecast values count as 0 demand."""
     rec = recommend_purchase(_forecast([-3.0, 2.0, 2.0]), "2026-01-01", "2026-01-03", daily_error=0.0)
     assert rec.expected_demand == pytest.approx(4.0)
     assert rec.recommended_units == 4
 
 
 def test_higher_service_level_means_more_stock():
+    """A higher service level gives a larger recommendation."""
     fc = _forecast([10.0] * 14)
     low = recommend_purchase(fc, "2026-01-01", "2026-01-14", daily_error=3.0, service_level=0.90)
     high = recommend_purchase(fc, "2026-01-01", "2026-01-14", daily_error=3.0, service_level=0.99)
@@ -49,6 +62,7 @@ def test_higher_service_level_means_more_stock():
 
 
 def test_period_outside_forecast_or_reversed_is_rejected():
+    """A period outside the forecast or with reversed dates raises an error."""
     fc = _forecast([10.0] * 5)
     with pytest.raises(ValueError, match="no cubre"):
         recommend_purchase(fc, "2026-01-01", "2026-01-10", daily_error=1.0)
@@ -57,14 +71,16 @@ def test_period_outside_forecast_or_reversed_is_rejected():
 
 
 def test_weekly_accuracy():
+    """Weekly accuracy counts the full weeks within the tolerance."""
     real = np.array([10.0] * 21)
-    pred = np.concatenate([[10.0] * 7, [11.0] * 7, [20.0] * 7])  # within, within (+10%), off (+100%)
+    pred = np.concatenate([[10.0] * 7, [11.0] * 7, [20.0] * 7])  # Good, good (+10%), bad (+100%).
     acc = weekly_accuracy(real, pred, tolerance=0.15)
     assert acc == {"accuracy_pct": pytest.approx(200 / 3), "weeks": 3, "weeks_within": 2}
     assert weekly_accuracy(real[:5], pred[:5])["accuracy_pct"] is None
 
 
 def test_choose_backtest_days():
+    """The test window is 90 days for long series and smaller for short ones."""
     assert choose_backtest_days(1826) == 90
     assert choose_backtest_days(200) == 40
     assert choose_backtest_days(40) == 14

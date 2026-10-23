@@ -10,4 +10,5 @@ class ReportGenerator():
     """
 
     def __init__(self):
+        """Create an empty object. There are no settings yet."""
         pass

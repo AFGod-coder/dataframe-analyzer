@@ -1,24 +1,23 @@
-"""
-LSTM model for demand forecasting.
+"""LSTM model for demand forecasting.
 
-Given a series with columns [date, sales] (already filtered for a
-specific store-item combination), this module handles scaling,
-windowing, the chronological split, training, prediction and metric
-calculation.
+The input is a series with the columns `date` and `sales` for one store
+and one item. This module scales the data, builds windows, splits the
+data by date, trains the model, predicts and calculates the metrics.
 
-Two evaluation protocols are supported:
-    - One-step-ahead (`predict`): each test day is predicted from the 30
-    previous REAL days. Comparable with the tree-based models.
-    - Recursive multi-step (`predict_recursive`): the whole test horizon is
-    forecast without seeing any real sales from the test period (each
-    prediction feeds the next window). Comparable with Prophet.
+There are two ways to evaluate the model:
+    - One step ahead (`predict`): each test day is predicted from the 30
+      real days before it. This can be compared with the tree models.
+    - Recursive, many steps (`predict_recursive`): the whole test period
+      is predicted without any real sales from that period. Each
+      prediction goes into the next window. This can be compared with
+      Prophet.
 """
 
 import logging
 import os
 
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")  # oculta logs INFO/WARNING de TensorFlow
-os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")  # evita el aviso de oneDNN y mejora reproducibilidad
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")  # Hide TensorFlow INFO and WARNING logs.
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")  # Avoid the oneDNN message and keep results reproducible.
 
 import numpy as np
 import pandas as pd
@@ -28,21 +27,28 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from tensorflow.keras.models import Sequential  # type: ignore
 from tensorflow.keras.layers import Input, LSTM, Dense  # type: ignore
 
-tf.get_logger().setLevel("ERROR")  # oculta el warning de GPU support
+tf.get_logger().setLevel("ERROR")  # Hide the GPU support warning.
 
 logger = logging.getLogger(__name__)
 
-# Semilla fija para que el entrenamiento sea reproducible (mismo resultado
-# en cada corrida). Necesario para la trazabilidad exigida por la rúbrica.
+# Fixed seed, so training gives the same result in every run. This makes
+# the experiments reproducible.
 SEED = 42
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
 
 
 class LSTMForecaster:
-    """Trains an LSTM model on a single store-item time series."""
+    """Train an LSTM model on the time series of one store and one item."""
 
     def __init__(self, window: int = 30, epochs: int = 20, batch_size: int = 16):
+        """Store the training settings. The network is built in `fit`.
+
+        Args:
+            window (int): Number of past days used to predict the next day.
+            epochs (int): Number of training passes over the data.
+            batch_size (int): Number of windows in each training batch.
+        """
         self.window = window
         self.epochs = epochs
         self.batch_size = batch_size
@@ -50,33 +56,37 @@ class LSTMForecaster:
         self.scaler = None
 
     def prepare_series(self, df: pd.DataFrame, store: int, item: int) -> pd.DataFrame:
-        """Filter one store-item series and sort it chronologically.
+        """Get the series of one store and item, in date order.
 
         Args:
-            df (pd.DataFrame): Full dataset with columns date, store, item, sales.
-            store (int): Store id to filter.
-            item (int): Item id to filter.
+            df (pd.DataFrame): Full dataset with the columns `date`,
+                `store`, `item` and `sales`.
+            store (int): Store id.
+            item (int): Item id.
 
         Returns:
-            pd.DataFrame: Series with columns date, sales, sorted chronologically.
+            pd.DataFrame: Series with the columns `date` and `sales`, in
+            date order.
         """
         serie = df[(df["store"] == store) & (df["item"] == item)][["date", "sales"]]
         serie["date"] = pd.to_datetime(serie["date"])
         return serie.sort_values("date").reset_index(drop=True)
 
     def scale(self, serie: pd.DataFrame, test_days: int = 90) -> np.ndarray:
-        """Scale sales values to [0, 1] fitting the scaler ONLY on the training
-        period, so no information from the test period (min/max) leaks into
-        the normalization. The test values are transformed with the scaler
-        fitted on train (they may fall slightly outside [0, 1], which is fine).
+        """Scale the sales values to the range [0, 1].
 
-        LSTM is sensitive to input scale, unlike the tree-based models
-        (XGBoost, Random Forest).
+        The scaler learns the minimum and maximum only from the training
+        period, so no information from the test period is used. The test
+        values use the same scaler, so they can be a little outside
+        [0, 1]. This is not a problem.
+
+        The LSTM needs scaled inputs. The tree models (XGBoost and Random
+        Forest) do not.
 
         Args:
-            serie (pd.DataFrame): Series with column sales.
-            test_days (int): Number of trailing days reserved for testing.
-                They are excluded when fitting the scaler.
+            serie (pd.DataFrame): Series with the column `sales`.
+            test_days (int): Number of last days kept for the test. The
+                scaler does not use them.
 
         Returns:
             np.ndarray: Scaled values of the whole series, shape (n, 1).
@@ -88,13 +98,14 @@ class LSTMForecaster:
         return self.scaler.transform(values)
 
     def create_windows(self, scaled_values: np.ndarray):
-        """Build sliding windows: use `window` past days to predict the next one.
+        """Build sliding windows: `window` past days predict the next day.
 
         Args:
-            scaled_values (np.ndarray): Scaled series values.
+            scaled_values (np.ndarray): Scaled values of the series.
 
         Returns:
-            tuple: (X, y) arrays ready for the LSTM (X shape: samples, timesteps, features).
+            tuple: Arrays `(X, y)` for the LSTM. `X` has the shape
+            (samples, timesteps, features).
         """
         X, y = [], []
         for i in range(self.window, len(scaled_values)):
@@ -105,15 +116,15 @@ class LSTMForecaster:
         return X, y
 
     def split_train_test(self, X: np.ndarray, y: np.ndarray, test_days: int = 90):
-        """Chronological train/test split (last `test_days` windows go to test).
+        """Split the windows by date: the last `test_days` go to the test.
 
         Args:
             X (np.ndarray): Input windows.
             y (np.ndarray): Target values.
-            test_days (int): Number of trailing windows reserved for testing.
+            test_days (int): Number of last windows kept for the test.
 
         Returns:
-            tuple: (X_train, X_test, y_train, y_test)
+            tuple: `(X_train, X_test, y_train, y_test)`.
         """
         X_train, X_test = X[:-test_days], X[-test_days:]
         y_train, y_test = y[:-test_days], y[-test_days:]
@@ -121,15 +132,18 @@ class LSTMForecaster:
         return X_train, X_test, y_train, y_test
 
     def fit(self, X_train: np.ndarray, y_train: np.ndarray):
-        """Train the LSTM model.
+        """Build and train the LSTM network.
 
-        The seed is reset before building the network so that each series
-        is reproducible on its own, independently of the order in which
-        series are processed.
+        The seed is set again before the network is built. In this way
+        each series gives the same result, in any order of processing.
 
         Args:
             X_train (np.ndarray): Training input windows.
             y_train (np.ndarray): Training targets.
+
+        Returns:
+            tf.keras.Model: The trained network (also saved in
+            `self.model`).
         """
         tf.keras.utils.set_random_seed(SEED)
         self.model = Sequential([
@@ -142,35 +156,38 @@ class LSTMForecaster:
         return self.model
 
     def predict(self, X_test: np.ndarray) -> np.ndarray:
-        """One-step-ahead prediction, inverse-transformed to real sales units.
+        """Predict one step ahead and return values in real sales units.
 
-        Each test day is predicted from the `window` previous REAL days
-        (including real days that belong to the test period).
+        Each test day is predicted from the `window` real days before it
+        (these can include real days of the test period).
 
         Args:
             X_test (np.ndarray): Test input windows.
 
         Returns:
-            np.ndarray: Predicted sales values (real scale).
+            np.ndarray: Predicted sales (real scale).
         """
         pred_scaled = self.model.predict(X_test, verbose=0)
         return self.scaler.inverse_transform(pred_scaled).flatten()
 
     def predict_recursive(self, scaled_values: np.ndarray, test_days: int = 90) -> np.ndarray:
-        """Recursive multi-step forecast over the whole test horizon.
+        """Predict the whole test period in a recursive way.
 
-        Starts from the last `window` days BEFORE the test period and
-        predicts `test_days` days ahead. Each prediction is appended to the
-        window and used to predict the next day, so no real sales from the
-        test period are ever seen. This is the same protocol used by Prophet
-        (train until the cutoff, then forecast the whole horizon).
+        The method starts from the last `window` days before the test
+        period and predicts `test_days` days ahead. Each prediction is
+        added to the window and used to predict the next day, so the
+        model never sees real sales of the test period. Prophet is
+        evaluated in the same way (train until the cutoff, then predict
+        the whole period).
 
         Args:
-            scaled_values (np.ndarray): Scaled values of the whole series, shape (n, 1).
-            test_days (int): Forecast horizon in days.
+            scaled_values (np.ndarray): Scaled values of the whole series,
+                shape (n, 1).
+            test_days (int): Number of days to predict.
 
         Returns:
-            np.ndarray: Forecast for the test period (real scale), shape (test_days,).
+            np.ndarray: Forecast for the test period (real scale), shape
+            (test_days,).
         """
         history = scaled_values[:-test_days, 0]
         window_values = list(history[-self.window:])
@@ -184,7 +201,7 @@ class LSTMForecaster:
         return self.scaler.inverse_transform(preds).flatten()
 
     def inverse_transform_y(self, y_scaled: np.ndarray) -> np.ndarray:
-        """Inverse-transform the scaled test targets back to real sales units.
+        """Change scaled target values back to real sales units.
 
         Args:
             y_scaled (np.ndarray): Scaled target values.
@@ -196,14 +213,16 @@ class LSTMForecaster:
 
     @staticmethod
     def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
-        """Compute MAE, RMSE and MAPE.
+        """Calculate MAE, RMSE and MAPE.
+
+        In MAPE, days with 0 real sales are divided by 1 instead of 0.
 
         Args:
             y_true (np.ndarray): Real sales values.
             y_pred (np.ndarray): Predicted sales values.
 
         Returns:
-            dict: {"MAE": ..., "RMSE": ..., "MAPE": ...}
+            dict: Keys `MAE`, `RMSE` and `MAPE` (MAPE in percent).
         """
         mae = mean_absolute_error(y_true, y_pred)
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))

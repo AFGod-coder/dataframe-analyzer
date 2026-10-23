@@ -1,10 +1,10 @@
-"""
-Purchase recommendation: turns a demand forecast into "how many units
-should I buy", which is the actual decision the article's third
-research question is about (section 1.1) -- a forecast alone is
-information, not a decision.
+"""Purchase recommendation based on a demand forecast.
 
-Recommended purchase for a coverage period [start, end]:
+A forecast only gives information. The store manager needs a decision:
+"how many units should I buy?". This module changes the forecast into
+that number.
+
+Recommended purchase for a period [start, end]:
 
     D       = sum of forecasted daily demand over the period
     SS      = z * sigma * sqrt(n)                  (safety stock)
@@ -12,20 +12,20 @@ Recommended purchase for a coverage period [start, end]:
 
 where
     n       = number of days in the period,
-    sigma   = RMSE of the model on its own backtest window for THIS
-              product (the model's typical daily error, measured on
-              data it did not train on),
-    z       = standard-normal quantile for the chosen service level
+    sigma   = RMSE of the model on its backtest window for this product
+              (the usual daily error, measured on data that the model
+              did not use for training),
+    z       = standard normal quantile for the chosen service level
               (90% -> 1.28, 95% -> 1.645, 99% -> 2.33),
-    I       = inventory the user already has at the start of the period.
+    I       = units that the user already has at the start of the period.
 
-The sqrt(n) term is the textbook safety-stock approximation that treats
-daily forecast errors as independent: errors partly cancel out over
-several days, so the uncertainty of a period total grows with the square
-root of its length, not linearly. It is an approximation (consecutive
-daily errors are usually somewhat correlated), which is why the app
-also reports the model's weekly accuracy on the user's own data, so the
-user can judge how much to trust the number.
+The sqrt(n) term is the standard safety stock formula. It supposes that
+daily errors are independent, so part of the errors cancel over several
+days. Because of this, the uncertainty of the total grows with the
+square root of the number of days, not in a linear way. Daily errors are
+often a little correlated, so this is only an approximation. For this
+reason the app also shows the weekly accuracy of the model on the user's
+own data, so the user can decide how much to trust the number.
 """
 
 import math
@@ -43,18 +43,22 @@ class PurchaseRecommendation:
     """Result of `recommend_purchase`.
 
     Attributes:
-        period_start (pd.Timestamp): First day covered.
-        period_end (pd.Timestamp): Last day covered (the user's target date).
+        period_start (pd.Timestamp): First day of the period.
+        period_end (pd.Timestamp): Last day of the period (the target
+            date of the user).
         days (int): Number of days in the period.
-        expected_demand (float): Sum of forecasted demand over the period.
-        demand_on_target_day (float): Forecasted demand for the target date alone.
-        safety_stock (float): Extra units to absorb forecast error.
-        current_inventory (float): Units the user already has.
+        expected_demand (float): Total forecast demand in the period.
+        demand_on_target_day (float): Forecast demand on the target date
+            only.
+        safety_stock (float): Extra units to cover forecast errors.
+        current_inventory (float): Units that the user already has.
         recommended_units (int): Units to buy (never negative).
-        service_level (float): Chosen probability of not running out.
-        z (float): Standard-normal quantile used.
-        daily_error (float): sigma used (model RMSE on its backtest).
-        daily_forecast (pd.DataFrame): ds, yhat for each day of the period.
+        service_level (float): Chosen probability of not running out of
+            stock.
+        z (float): Standard normal quantile used.
+        daily_error (float): Value of sigma (model RMSE on its backtest).
+        daily_forecast (pd.DataFrame): Columns `ds` and `yhat` for each
+            day of the period.
     """
     period_start: pd.Timestamp
     period_end: pd.Timestamp
@@ -78,23 +82,27 @@ def recommend_purchase(
     current_inventory: float = 0.0,
     service_level: float = 0.95,
 ) -> PurchaseRecommendation:
-    """Compute how many units to buy to cover demand over a period.
+    """Calculate how many units to buy to cover the demand of a period.
 
     Args:
-        forecast (pd.DataFrame): Daily forecast with columns ds, yhat,
-            covering at least [period_start, period_end].
-        period_start: First day the purchase must cover.
-        period_end: Last day the purchase must cover (target date).
+        forecast (pd.DataFrame): Daily forecast with the columns `ds` and
+            `yhat`. It must include every day from `period_start` to
+            `period_end`.
+        period_start: First day that the purchase must cover.
+        period_end: Last day that the purchase must cover (target date).
         daily_error (float): Model RMSE on its backtest window (sigma).
-        current_inventory (float): Units already in stock at period_start.
-        service_level (float): Desired probability of not running out
-            (e.g. 0.95).
+        current_inventory (float): Units in stock on `period_start`.
+        service_level (float): Wanted probability of not running out of
+            stock (for example 0.95).
 
     Returns:
-        PurchaseRecommendation
+        PurchaseRecommendation: Units to buy and the values used to
+        calculate them.
 
     Raises:
-        ValueError: If the period is invalid or not covered by the forecast.
+        ValueError: If the period is not valid, if the service level or
+            the inventory is out of range, or if the forecast does not
+            cover the whole period.
     """
     start = pd.Timestamp(period_start).normalize()
     end = pd.Timestamp(period_end).normalize()
@@ -115,7 +123,7 @@ def recommend_purchase(
             f"Periodo: {start.date()} a {end.date()}, días pronosticados: {len(period)}."
         )
 
-    # Demand cannot be negative: clip model outputs before summing.
+    # Demand cannot be negative, so negative predictions become 0 first.
     period["yhat"] = period["yhat"].clip(lower=0)
     expected_demand = float(period["yhat"].sum())
     demand_on_target_day = float(period.loc[period["ds"] == end, "yhat"].iloc[0])
@@ -141,19 +149,21 @@ def recommend_purchase(
 
 
 def weekly_accuracy(y_true, y_pred, tolerance: float = 0.15) -> dict:
-    """Share of full weeks whose forecasted total is within +-tolerance of the real total.
+    """Calculate the share of full weeks with a good forecast total.
 
-    Same definition used for the ">95% accuracy" criterion in section 2.5,
-    applied here to the user's own product, on the model's backtest window.
+    A week is good when its forecast total is within +-tolerance of the
+    real total. This is the same weekly accuracy used in the study, here
+    calculated for the user's product on the backtest window.
 
     Args:
-        y_true: Real daily values of the backtest window (chronological).
+        y_true: Real daily values of the backtest window, in date order.
         y_pred: Predicted daily values for the same days.
-        tolerance (float): Relative tolerance (0.15 = +-15%).
+        tolerance (float): Relative tolerance (0.15 means +-15%).
 
     Returns:
-        dict: {"accuracy_pct": float | None, "weeks": int, "weeks_within": int}.
-        accuracy_pct is None if the window has no complete week.
+        dict: Keys `accuracy_pct` (float, or None when the window has no
+        full week), `weeks` (number of full weeks) and `weeks_within`
+        (number of good weeks).
     """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.clip(np.asarray(y_pred, dtype=float), 0, None)
@@ -162,7 +172,7 @@ def weekly_accuracy(y_true, y_pred, tolerance: float = 0.15) -> dict:
         return {"accuracy_pct": None, "weeks": 0, "weeks_within": 0}
     real = y_true[: n_weeks * 7].reshape(n_weeks, 7).sum(axis=1)
     pred = y_pred[: n_weeks * 7].reshape(n_weeks, 7).sum(axis=1)
-    # A week with 0 real sales counts as accurate only if the forecast is ~0 too.
+    # A week with 0 real sales is good only if the forecast is also close to 0.
     within = np.where(real > 0, np.abs(real - pred) <= tolerance * real, pred < 1)
     return {
         "accuracy_pct": float(within.mean() * 100),
@@ -172,17 +182,17 @@ def weekly_accuracy(y_true, y_pred, tolerance: float = 0.15) -> dict:
 
 
 def choose_backtest_days(history_days: int, default: int = 90) -> int:
-    """Size of the evaluation window for a series of `history_days` days.
+    """Choose the size of the evaluation window for a daily series.
 
-    Keeps the project's standard 90-day window when there is enough
-    history, and shrinks it for short uploads so enough data is left to
-    train on (roughly 1/5 of the history, never below 2 weeks).
+    The standard window is 90 days. For short series the window is
+    smaller (about 1/5 of the history, but never less than 2 weeks), so
+    enough data stays for training.
 
     Args:
-        history_days (int): Length of the daily series.
-        default (int): Window used for long series.
+        history_days (int): Number of days in the series.
+        default (int): Window size for long series.
 
     Returns:
-        int: Number of trailing days to hold out for evaluation.
+        int: Number of last days to keep for the evaluation.
     """
     return int(min(default, max(14, history_days // 5)))

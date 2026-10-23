@@ -1,15 +1,17 @@
-"""
-Run script: backtest of the 4 BASE models (Prophet, Random Forest, XGBoost,
-LSTM) over the 51-series stratified sample used in the article, with the same
-90-day test window and through the exact ForecastService.get_forecast() code
-path the web app uses (recursive multi-step forecasts for the lag-based
-models, via service/adapters.py).
+"""Backtest of the 4 base models on the stratified sample of 51 series.
 
-Produces results/unified_metrics.csv (one row per model x series). The
-Ensemble's metrics come from scripts/run_ensemble_simulation.py; both files are
-merged into results/final_comparison.csv by scripts/compute_article_stats.py.
+The base models are Prophet, Random Forest, XGBoost and LSTM. The script
+uses a 90-day test window and the same code as the web app,
+`ForecastService.get_forecast()`. The lag models make recursive
+forecasts through `service/adapters.py`.
 
-Resumable and chunkable (each series is flushed to disk as soon as it is done):
+Output: `results/unified_metrics.csv`, with one row for each model and
+series. The ensemble metrics come from `scripts/run_ensemble_simulation.py`.
+`scripts/compute_article_stats.py` joins both files into
+`results/final_comparison.csv`.
+
+The script can continue after a stop, and it can run in parts. Each
+series is saved to disk when it is finished:
     python3 scripts/run_unified_simulation.py
     MODEL_FILTER=LSTM SERIES_START=0 SERIES_END=10 python3 scripts/run_unified_simulation.py
 """
@@ -23,35 +25,37 @@ import pandas as pd
 from dataframe_analyzer.data.loader import DataLoader
 from dataframe_analyzer.service.forecast_service import ForecastService
 
-logging.basicConfig(level=logging.WARNING)  # keep per-model noise down
+logging.basicConfig(level=logging.WARNING)  # Show fewer log messages from the models.
 logger = logging.getLogger(__name__)
 
 DATA_PATH = "data/raw/train.csv"
 TEST_DAYS = 90
 OUTPUT_PATH = os.environ.get("UNIFIED_OUTPUT", "results/unified_metrics.csv")
 SUMMARY_PATH = os.environ.get("UNIFIED_SUMMARY", "results/unified_metrics_summary.csv")
-SAMPLE_FRACTION = 0.10  # 10% de las 500 series ~= 51 series
+SAMPLE_FRACTION = 0.10  # 10% of the 500 series, about 51 series.
 RANDOM_SEED = 42
 
-# The 4 base models of the article (section 4.3), i.e. the inputs of the Ensemble.
-OFFICIAL_MODELS = ["Prophet", "Random Forest", "XGBoost", "LSTM"]  # inputs of the Ensemble
+# The 4 base models, which are the inputs of the ensemble.
+OFFICIAL_MODELS = ["Prophet", "Random Forest", "XGBoost", "LSTM"]
 
 
 def select_representative_sample(df: pd.DataFrame, fraction: float, seed: int) -> list[tuple[int, int]]:
-    """Select a stratified representative sample of (store, item) pairs.
+    """Select a stratified sample of (store, item) pairs.
 
-    Identical to the function already used in run_prophet_simulation_sample.py
-    and run_lstm_simulation_sample.py (same fraction, same seed) so this
-    script evaluates the exact same 51 series already used for Prophet/LSTM,
-    instead of a different random subset.
+    The series are split into three groups by total sales (low, medium
+    and high). The same fraction is taken from each group. With the same
+    fraction and seed, the function always gives the same 51 series, so
+    all models are evaluated on the same data.
 
     Args:
-        df (pd.DataFrame): Full raw dataframe with columns date, store, item, sales.
-        fraction (float): Fraction of the 500 (store, item) series to keep.
-        seed (int): Random seed for reproducibility.
+        df (pd.DataFrame): Full raw dataset with the columns `date`,
+            `store`, `item` and `sales`.
+        fraction (float): Fraction of the 500 (store, item) series to
+            keep.
+        seed (int): Random seed for reproducible results.
 
     Returns:
-        list[tuple[int, int]]: (store, item) pairs selected.
+        list[tuple[int, int]]: Selected (store, item) pairs.
     """
     totals = df.groupby(["store", "item"])["sales"].sum().reset_index()
     totals["volume_tercile"] = pd.qcut(totals["sales"], 3, labels=["low", "medium", "high"])
@@ -66,35 +70,33 @@ def select_representative_sample(df: pd.DataFrame, fraction: float, seed: int) -
 
 
 if __name__ == "__main__":
-    # 1. Carga de datos + muestra (reutiliza DataLoader y la misma funcion
-    #    de muestreo estratificado de los scripts anteriores)
+    # 1. Load the data and select the stratified sample.
     df = DataLoader(DATA_PATH).load()
     pairs = select_representative_sample(df, SAMPLE_FRACTION, RANDOM_SEED)
     print(f"Muestra estratificada: {len(pairs)} series (store, item).")
 
-    # 2. Servicio (carga y limpia el dataset una sola vez)
+    # 2. Create the service (it loads and cleans the dataset only once).
     service = ForecastService(DATA_PATH)
 
-    # 3. Simulacion: cada modelo registrado, sobre cada serie de la muestra.
-    #    MODEL_FILTER (variable de entorno opcional) permite correr un solo
-    #    modelo a la vez -- util para ejecutar la simulacion completa en
-    #    tandas cortas sin perder progreso si una tanda se interrumpe.
+    # 3. Simulation: run each model on each series of the sample.
+    #    MODEL_FILTER (optional environment variable) runs only one model.
+    #    This helps to run the full simulation in short parts without
+    #    losing progress if one part stops.
     model_filter = os.environ.get("MODEL_FILTER")
     models_to_run = [model_filter] if model_filter else OFFICIAL_MODELS
 
-    # Optional chunking by series index, so a slow model (many series x many
-    # trees/epochs) can be run across several short invocations without
-    # losing progress -- each chunk appends to the same per-series CSV.
+    # Optional parts by series index. A slow model can run in several
+    # short calls without losing progress. Each part adds rows to the same
+    # CSV file.
     start_idx = int(os.environ.get("SERIES_START", 0))
     end_idx = int(os.environ.get("SERIES_END", len(pairs)))
     chunk_pairs = pairs[start_idx:end_idx]
     print(f"Procesando series [{start_idx}:{end_idx}] de {len(pairs)} ({len(chunk_pairs)} series).")
 
-    # Resumable: load whatever is already in OUTPUT_PATH so a call that
-    # gets cut off by its own timeout loses nothing -- the next call just
-    # skips the (model, store, item) combos already present and keeps
-    # going, flushing to disk after every single series instead of only
-    # at the very end.
+    # Continue after a stop: read the rows already in OUTPUT_PATH. The
+    # next call skips the (model, store, item) combinations that are
+    # already done. Each series is saved to disk when it is finished, not
+    # only at the end.
     os.makedirs("results", exist_ok=True)
     if os.path.exists(OUTPUT_PATH):
         done_df = pd.read_csv(OUTPUT_PATH)
@@ -125,8 +127,8 @@ if __name__ == "__main__":
                 }
                 rows.append(row)
                 done_keys.add((model_name, store, item))
-                # Flush immediately: append this one row to OUTPUT_PATH so
-                # a timeout mid-chunk never loses an already-computed series.
+                # Save this row now, so a stop in the middle of a part does
+                # not lose a series that is already calculated.
                 pd.DataFrame([row]).to_csv(
                     OUTPUT_PATH, mode="a", header=not os.path.exists(OUTPUT_PATH), index=False
                 )
@@ -137,8 +139,8 @@ if __name__ == "__main__":
         elapsed = time.time() - t0
         print(f"[{model_name}] {n_ok} nuevas OK, {n_skip} ya hechas, {n_fail} fallidas, {elapsed:.1f}s")
 
-    # 4. Agregacion de resultados: se relee OUTPUT_PATH completo (cada
-    #    serie ya quedo escrita ahi mismo apenas se calculo, en el paso 3).
+    # 4. Summarize the results. OUTPUT_PATH is read again, because step 3
+    #    saved each series there.
     results = pd.read_csv(OUTPUT_PATH)
     summary = (
         results.groupby("model")[["MAE", "RMSE", "MAPE"]]
@@ -146,7 +148,7 @@ if __name__ == "__main__":
         .round(3)
     )
 
-    # 5. Guardado
+    # 5. Save the files.
     os.makedirs("results", exist_ok=True)
     results.to_csv(OUTPUT_PATH, index=False)
     summary.to_csv(SUMMARY_PATH)

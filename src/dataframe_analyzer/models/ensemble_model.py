@@ -1,52 +1,44 @@
-"""
-EnsembleForecaster: a stacking model that fuses the 4 official models of
-section 2.2 (Prophet, Random Forest, XGBoost, LSTM) into a single
-mathematical model, per the professor's clarification that section 2.4's
-"modelo matematico" (singular, 100 pts, the heaviest-weighted criterion
-of Entregable 2) should be one consolidated model rather than 4 parallel
-candidates.
+"""EnsembleForecaster: one model that combines the 4 base models.
 
-Training method (walk-forward stacking, no leakage):
+The base models are Prophet, Random Forest, XGBoost and LSTM. The
+ensemble joins them into one mathematical model with stacking.
+
+Training method (walk-forward stacking, without data leakage):
 
     |------- train_base -------|--- validation_meta ---|------ test ------|
 
-    1. The 4 base models are fit on `train_base` only.
-    2. They predict over `validation_meta` (data they never saw). Those
-       4 out-of-sample predictions, together with the real sales in
-       `validation_meta`, are what trains the meta-model.
-    3. For the final backtest/future forecast (ForecastService's own
-       `test` or `horizon_days` window), the 4 base models are re-fit on
-       ALL of `train_base + validation_meta` (so they use every bit of
-       history available before the window being predicted), their
-       predictions are combined with the ALREADY-TRAINED (frozen)
-       meta-model weights -- the meta-model itself is not retrained on
-       data it will then be evaluated against.
+    1. The 4 base models are trained only with `train_base`.
+    2. They predict `validation_meta`, which is data that they did not
+       see. These 4 predictions and the real sales in `validation_meta`
+       are used to learn the weights.
+    3. For the final forecast (the `test` window or the future
+       `horizon_days`), the 4 base models are trained again with all of
+       `train_base + validation_meta`, so they use all the history before
+       the window to predict. Their predictions are combined with the
+       weights from step 2. The weights are frozen: they are not learned
+       again with data that is later used to evaluate them.
 
-Meta-model: a CONSTRAINED convex combination (weights >= 0, summing to 1,
-no intercept) fit by minimizing squared error on `validation_meta`, not a
-plain unconstrained linear regression. An earlier version used plain
-`sklearn.linear_model.LinearRegression` on the 4 out-of-sample
-predictions; measured against the same 51-series stratified sample used
-throughout section 2.3, it OVERFIT the small `validation_meta` window --
-with no constraint it assigned coefficients above 1 offset by negative
-ones -- e.g. for store 2 / item 28: w_RF=1.209, w_XGB=0.138,
-w_Prophet=-0.102, w_LSTM=-0.163, intercept=1.173 -- a textbook symptom of
-overfitting a short validation window with 4+1 free parameters. Over the
-51-series sample that version scored WORSE than Prophet alone:
-MAE 7.02 +/- 2.12, RMSE 8.75 +/- 2.57, MAPE 14.79 +/- 4.67 (mean +/- std
-across series), and it was the most accurate of the five models in only
-11 of the 51 series (vs. Prophet 6.41 MAE) -- the fusion was hurting
-accuracy instead of helping it.
+Weights: a convex combination. Each weight is >= 0, the weights add up
+to 1 and there is no intercept. The weights minimize the squared error
+on `validation_meta`.
 
-Constraining the weights to be non-negative and sum to 1 (a weighted
-average: each base model gets a trust share between 0% and 100% and the
-shares add up to 100%, with no intercept to absorb bias) removes that
-degree of freedom. Re-measured on the same 51-series sample, this
-constrained version is statistically indistinguishable from Prophet alone
-on average while still being one single, explicit, algorithmically
-trained mathematical model that formally fuses the 4 base models -- the
-"modelo matematico" (singular) the rubric and the professor's
-clarification ask for, without trading away accuracy to get it.
+Why the weights have these limits: an earlier version used a normal
+`sklearn.linear_model.LinearRegression` without limits. On the same
+sample of 51 series, it overfit the short `validation_meta` window. It
+gave some models weights above 1 and others negative weights. For
+example, for store 2 and item 28: w_RF=1.209, w_XGB=0.138,
+w_Prophet=-0.102, w_LSTM=-0.163, intercept=1.173. This is a typical
+sign of overfitting with 4+1 free parameters and a short window. On the
+51 series that version was worse than Prophet alone: MAE 7.02 +/- 2.12,
+RMSE 8.75 +/- 2.57, MAPE 14.79 +/- 4.67 (mean +/- standard deviation),
+compared with a Prophet MAE of 6.41. It was the best of the five models
+in only 11 of the 51 series.
+
+With the limits, the result is a weighted average: each base model gets
+a share between 0% and 100%, the shares add up to 100%, and there is no
+intercept. On the same 51 series, this version has no significant
+difference from Prophet on average, and it is still one single,
+explicit mathematical model that combines the 4 base models.
 """
 
 import logging
@@ -65,6 +57,11 @@ BASE_MODEL_NAMES = ["Prophet", "Random Forest", "XGBoost", "LSTM"]
 
 
 def _build_base_models():
+    """Create new, untrained copies of the 4 base models.
+
+    Returns:
+        dict: Map from each name in `BASE_MODEL_NAMES` to a new model.
+    """
     return {
         "Prophet": ProphetForecaster(),
         "Random Forest": RandomForestAdapter(),
@@ -74,6 +71,16 @@ def _build_base_models():
 
 
 def _date_split(series: pd.DataFrame, test_days: int):
+    """Split a series by date into a first part and a last part.
+
+    Args:
+        series (pd.DataFrame): Columns `ds` and `y`.
+        test_days (int): Number of last days in the second part.
+
+    Returns:
+        tuple: `(train, test, cutoff)`, where `cutoff` is the last date of
+        the first part.
+    """
     cutoff = series["ds"].max() - pd.Timedelta(days=test_days)
     train = series[series["ds"] <= cutoff].reset_index(drop=True)
     test = series[series["ds"] > cutoff].reset_index(drop=True)
@@ -81,25 +88,40 @@ def _date_split(series: pd.DataFrame, test_days: int):
 
 
 def _fit_convex_weights(X: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """Find weights w (one per base model) minimizing mean squared error
-    of X @ w against y, subject to w_i >= 0 and sum(w) = 1.
+    """Find the convex weights that minimize the mean squared error.
 
-    Parametrized via softmax-like absolute-value normalization so the
-    optimizer (Nelder-Mead, derivative-free, robust for this tiny
-    4-parameter problem) can search freely in R^4 while every candidate
-    it evaluates is automatically a valid convex combination.
+    The function looks for one weight w_i for each base model that
+    minimizes the mean squared error of `X @ w` against `y`, with
+    w_i >= 0 and sum(w) = 1.
+
+    The optimizer works with free values theta, and each weight is
+    w_i = |theta_i| / sum(|theta_j|). In this way every value that the
+    optimizer tests is a valid convex combination. Nelder-Mead does not
+    need derivatives and works well for this small problem with 4
+    parameters.
 
     Args:
-        X (np.ndarray): Shape (n_samples, n_models) -- each base model's
-            out-of-sample predictions on the validation window.
-        y (np.ndarray): Shape (n_samples,) -- the real observed values.
+        X (np.ndarray): Shape (n_samples, n_models). Predictions of each
+            base model on the validation window (data not used for
+            training).
+        y (np.ndarray): Shape (n_samples,). Real values.
 
     Returns:
-        np.ndarray: Shape (n_models,), non-negative, summing to 1.
+        np.ndarray: Shape (n_models,). Weights that are >= 0 and add up
+        to 1.
     """
     n_models = X.shape[1]
 
     def loss(raw_w):
+        """Calculate the mean squared error for the free values `raw_w`.
+
+        Args:
+            raw_w (np.ndarray): Free values that become weights after
+                normalization.
+
+        Returns:
+            float: Mean squared error of the weighted prediction.
+        """
         w = np.abs(raw_w)
         total = w.sum()
         w = (np.ones(n_models) / n_models) if total == 0 else w / total
@@ -114,55 +136,78 @@ def _fit_convex_weights(X: np.ndarray, y: np.ndarray) -> np.ndarray:
 
 
 class EnsembleForecaster:
-    """Weighted-average stacking ensemble of Prophet, Random Forest,
-    XGBoost and LSTM, with the weights learned (not hand-picked) via a
-    constrained least-squares fit on an out-of-sample validation window.
+    """Stacking ensemble of Prophet, Random Forest, XGBoost and LSTM.
+
+    The forecast is a weighted average of the 4 base models. The weights
+    are learned from data (not chosen by hand) with least squares and
+    convex limits, on a validation window that the base models did not
+    use for training.
     """
 
     def __init__(self, meta_days: int = 90):
-        """
+        """Set the size of the weight validation window.
+
         Args:
-            meta_days (int): Size (in days) of the `validation_meta`
-                window carved out of `train` to learn the weights.
-                Defaults to 90, the same window size used everywhere
-                else in this project for a held-out evaluation window.
+            meta_days (int): Size in days of the `validation_meta` window
+                taken from `train` to learn the weights. Defaults to 90,
+                the same size as the test window in the rest of the
+                project.
         """
         self.meta_days = meta_days
-        self._base_models = None  # dict[name -> fitted model], re-fit on ALL of `train`
-        self._weights: np.ndarray | None = None  # length-4 array, >=0, sums to 1
+        self._base_models = None  # Name -> model trained with all of `train`.
+        self._weights: np.ndarray | None = None  # 4 values, >= 0, sum = 1.
         self._history = None
 
-    # -- uniform interface expected by ForecastService -----------------
+    # -- Common interface used by ForecastService ----------------------
 
     def prepare_series(self, df: pd.DataFrame, store: int, item: int) -> pd.DataFrame:
+        """Get the daily sales series of one store and item.
+
+        Args:
+            df (pd.DataFrame): Clean dataset with the columns `date`,
+                `store`, `item` and `sales`.
+            store (int): Store id.
+            item (int): Item id.
+
+        Returns:
+            pd.DataFrame: Series with the columns `ds` and `y`.
+        """
         prophet_like = ProphetForecaster()
         return prophet_like.prepare_series(df, store=store, item=item)
 
     def split_train_test(self, series: pd.DataFrame, test_days: int):
+        """Split the series into a training part and a test part by date.
+
+        Args:
+            series (pd.DataFrame): Columns `ds` and `y`.
+            test_days (int): Number of last days kept for the test.
+
+        Returns:
+            tuple: `(train, test, cutoff)`.
+        """
         return _date_split(series, test_days)
 
     def fit(self, train: pd.DataFrame) -> None:
-        """Train the 4 base models + learn the fusion weights, no leakage.
+        """Train the 4 base models and learn the weights, without leakage.
 
         Args:
-            train (pd.DataFrame): Columns ds, y -- everything available
-                before the window ForecastService will later ask us to
-                predict (either the 2.3 backtest window or, when called
-                a second time on the full series, before the future
-                forecast horizon).
+            train (pd.DataFrame): Columns `ds` and `y`. All the data
+                before the window that will be predicted later (the
+                backtest window or, for the full series, the future
+                horizon).
         """
         if len(train) <= self.meta_days * 2:
-            # Series too short to carve out a separate meta-validation
-            # window without starving the base models -- fall back to a
-            # 70/30 split instead of a fixed day count.
+            # The series is too short to keep a full validation window
+            # and still train the base models well. In this case we use
+            # about the last third of the data for validation.
             meta_days = max(14, len(train) // 3)
         else:
             meta_days = self.meta_days
 
         train_base, validation_meta, _ = _date_split(train, meta_days)
 
-        # 1. Fit base models on train_base only, predict validation_meta
-        #    (data they have not seen) to build the weight-fitting inputs.
+        # 1. Train the base models only with train_base and predict
+        #    validation_meta (new data for them) to learn the weights.
         stage1_models = _build_base_models()
         meta_X = np.zeros((len(validation_meta), len(BASE_MODEL_NAMES)))
         for col, name in enumerate(BASE_MODEL_NAMES):
@@ -178,11 +223,10 @@ class EnsembleForecaster:
             dict(zip(BASE_MODEL_NAMES, self._weights)),
         )
 
-        # 2. Re-fit the base models on ALL of `train` (train_base +
-        #    validation_meta) so inference uses the most up-to-date
-        #    history. The fusion weights stay frozen -- they are NOT
-        #    re-fit here, since that would mean evaluating them on data
-        #    overlapping their own training window later.
+        # 2. Train the base models again with all of `train` (train_base
+        #    and validation_meta), so the forecast uses the most recent
+        #    history. The weights stay frozen. They are not learned again,
+        #    because then they would be evaluated on their own data.
         self._base_models = _build_base_models()
         for name in BASE_MODEL_NAMES:
             self._base_models[name].fit(train)
@@ -190,13 +234,13 @@ class EnsembleForecaster:
         self._history = train
 
     def predict(self, dates: pd.DataFrame) -> pd.DataFrame:
-        """Combine the 4 base models' predictions via the learned weights.
+        """Combine the predictions of the 4 base models with the weights.
 
         Args:
-            dates (pd.DataFrame): Column ds with the dates to forecast.
+            dates (pd.DataFrame): Column `ds` with the dates to forecast.
 
         Returns:
-            pd.DataFrame: Columns ds, yhat.
+            pd.DataFrame: Columns `ds` and `yhat`.
         """
         base_X = np.zeros((len(dates), len(BASE_MODEL_NAMES)))
         for col, name in enumerate(BASE_MODEL_NAMES):
@@ -208,6 +252,17 @@ class EnsembleForecaster:
 
     @staticmethod
     def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+        """Calculate MAE, RMSE and MAPE.
+
+        In MAPE, days with 0 real sales are divided by 1 instead of 0.
+
+        Args:
+            y_true (np.ndarray): Real values.
+            y_pred (np.ndarray): Predicted values.
+
+        Returns:
+            dict: Keys `MAE`, `RMSE` and `MAPE` (MAPE in percent).
+        """
         mae = mean_absolute_error(y_true, y_pred)
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
         mape = np.mean(np.abs((y_true - y_pred) / np.where(y_true == 0, 1, y_true))) * 100
@@ -215,8 +270,13 @@ class EnsembleForecaster:
 
     @property
     def weights(self) -> dict:
-        """The 4 learned fusion weights (non-negative, summing to 1), for
-        documentation/plots. No intercept term in this formulation."""
+        """Get the 4 learned weights, for reports and charts.
+
+        Returns:
+            dict: Weight of each base model (>= 0, sum = 1) and the key
+            `intercept`, which is always 0.0. The dictionary is empty if
+            the model is not trained yet.
+        """
         if self._weights is None:
             return {}
         d = dict(zip(BASE_MODEL_NAMES, self._weights))
