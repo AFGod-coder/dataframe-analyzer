@@ -109,9 +109,39 @@ python scripts/explore_customer_data.py
 streamlit run webapp/app.py
 ```
 
-Abre una página local donde eliges tienda, producto y horizonte de pronóstico, y ves el resultado gráfico junto con las métricas de error (MAE, RMSE, MAPE). Por ahora usa `ProphetForecaster` (el único modelo listo); cuando la sección 2.3 defina cuál de los 4 modelos comparados gana, basta con registrarlo en `MODEL_REGISTRY` (`src/dataframe_analyzer/service/forecast_service.py`) para que aparezca en el selector de la app, sin tocar el resto del código.
+La app tiene dos pestañas y usa por defecto el modelo matemático oficial, **Ensemble (Fusionado)** (sección 2.4), que combina Prophet, Random Forest, XGBoost y LSTM con pesos aprendidos. Los 4 modelos base siguen disponibles en el selector para comparar (`MODEL_REGISTRY` en `src/dataframe_analyzer/service/forecast_service.py`).
 
-La app lee `data/raw/train.csv` directamente (no el CSV ya procesado por el pipeline), porque Prophet necesita la columna `date` original y el pipeline la descompone/elimina.
+**1. Mis ventas: ¿cuánto comprar?** — flujo para un usuario final:
+
+1. Descarga la plantilla Excel desde la app (o usa el botón *Usar datos de ejemplo*).
+2. Sube tu historial de ventas (`.xlsx` o `.csv`) con esta estructura:
+
+   | columna | obligatoria | ejemplo |
+   |---|---|---|
+   | `fecha` | Sí | `2025-01-02` (también `02/01/2025` o celda de fecha de Excel) |
+   | `tienda` | No | `Centro` (si falta, todo se toma como una sola tienda) |
+   | `producto` | Sí | `Arroz 1kg` |
+   | `cantidad_vendida` | Sí | `14` |
+
+   Se aceptan sinónimos de columnas (`date`, `sku`, `ventas`, `unidades`, `sucursal`...). Puede haber una fila por día o una por venta (las del mismo día se suman); los días sin registros se toman como 0 ventas. Cada producto necesita al menos 120 días de historia (ideal: 2 años).
+3. La app valida el archivo, reporta los problemas que encuentre y lista los productos aptos.
+4. Elige el producto y genera su pronóstico (con el Ensemble tarda 1-3 minutos).
+5. Elige la fecha objetivo, desde cuándo quieres cubrir, tu inventario actual y el nivel de servicio. La app recomienda cuántas unidades comprar:
+
+   `unidades = ⌈ demanda esperada del periodo + z · RMSE · √días − inventario actual ⌉` (nunca negativo)
+
+   donde `RMSE` es el error diario del modelo medido sobre tus propios datos y `z` depende del nivel de servicio (90 % → 1.28, 95 % → 1.645, 99 % → 2.33). También muestra la precisión semanal del modelo en tu producto y permite descargar la recomendación en Excel.
+
+La lógica está en `src/dataframe_analyzer/data/sales_upload.py` (validación y normalización del archivo) y `src/dataframe_analyzer/service/inventory.py` (recomendación de compra).
+
+**2. Dataset del proyecto** — pronósticos sobre cualquier tienda-producto del dataset de Kaggle del artículo, con métricas MAE/RMSE/MAPE y exportación a CSV. Lee `data/raw/train.csv` directamente (no el CSV procesado por el pipeline), porque los modelos necesitan la columna `date` original.
+
+### Pruebas
+
+```bash
+pip install pytest
+PYTHONPATH=src pytest tests -q
+```
 
 ## Estado del proyecto
 

@@ -9,4 +9,5 @@ xgboost
 numpy
 tensorflow
 streamlit
+openpyxl
 -e .
